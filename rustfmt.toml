@@ -1,0 +1,3 @@
+# `imports_granularity` / `group_imports` are still nightly-only in rustfmt and
+# would emit a warning on every stable run, so they are deliberately left out.
+style_edition = "2024"

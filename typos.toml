@@ -1,0 +1,11 @@
+# Spell checking, the `cspell` equivalent for this toolchain.
+# Run with: typos
+
+[files]
+extend-exclude = ["Cargo.lock", "target/", ".local/"]
+
+[default.extend-words]
+# Telegram/MTProto vocabulary that is not English but is correct here.
+grammers = "grammers"
+mtproto = "mtproto"
+tgfwd = "tgfwd"

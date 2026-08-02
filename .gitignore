@@ -1,0 +1,16 @@
+# Rust build output
+/target
+
+# Anything under .local/ is scratch space: design notes, experiments, throwaway
+# scripts. It is never part of the published project.
+.local/
+
+# Runtime state that must never be committed. The session file is a live
+# credential: anyone holding it is logged into the account.
+*.session
+*.session.json
+/config.toml
+/media-cache/
+
+# macOS
+.DS_Store

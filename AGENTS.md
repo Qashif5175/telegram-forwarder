@@ -1,0 +1,116 @@
+# AGENTS.md
+
+Guidance for anyone — human or agent — working on this repository.
+
+## What this is
+
+`tgfwd` mirrors Telegram messages from many source chats into many target chats.
+It is built around one hostile case: **a publisher posts, then deletes one second
+later**. Everything below follows from that.
+
+## Non-negotiable design rules
+
+1. **Capture before you decide.** `Snapshotter::capture` is synchronous and
+   cannot fail. It runs before filtering, before routing, before any network
+   call. Once a message is captured, deletion cannot take it away. Never move
+   work ahead of capture, and never make capture `async`.
+
+2. **Targets are independent.** Each target gets its own task and its own place
+   in the pacer. One rate-limited chat must never delay the other nine. Do not
+   introduce a shared serial queue.
+
+3. **Failures degrade, they do not just retry.** See `engine/failure.rs`. A
+   Telegram error means one of four things — wait, degrade, back off, or give up
+   — and conflating them is the main way this class of tool loses messages.
+
+4. **Nobody types a chat ID.** Everything selectable comes from the account's
+   own dialog list (`telegram/dialogs.rs`). A mistyped ID fails silently at
+   delivery time, which is the worst possible moment.
+
+5. **Identifiers are for machines, not people.** A route's `id` exists so logs,
+   the dashboard and shell scripts can name one. It is derived from the source
+   chat by `auto_id`; the user is never asked to invent or recall it. Anywhere a
+   route is offered for selection, show `describe_route` — what it moves — not
+   the id. Do not add a prompt that asks the user to name something, and never
+   ask anyone to type a value that already exists in the config or on Telegram:
+   chat titles are full of emoji and symbols that cannot be typed from memory.
+
+## Architecture
+
+```
+main.rs → cli.rs → commands/ → engine/
+                             → telegram/  (all Telegram I/O)
+                             → config/    (schema, validation)
+                             → session.rs (single-file Session impl)
+                             → ui/        (theme, prompts, logger, TUI)
+```
+
+`telegram/` never depends on `cli/`, `config/` or `ui/`. The login flow asks
+questions through the `LoginPrompt` trait so it carries no terminal dependency.
+
+### The delivery ladder (`engine/delivery.rs`)
+
+| Rung | Cost | Survives |
+|---|---|---|
+| `Forward` | 1 RPC, no upload, keeps attribution | nothing extra |
+| `Copy` | 1 RPC, no upload, reuses the file reference | source deletion, forward restrictions |
+| `Rehost` | re-uploads snapshotted bytes | a dead file reference |
+
+`DeliveryMode` picks which rungs exist. `Auto` uses all three, which is why it is
+the default. Anything delivered below the top rung is counted as *rescued*.
+
+### Session storage (`session.rs`)
+
+`grammers-session` ships only a memory store and a SQLite one. This project
+implements the `Session` trait over a single JSON file instead, so
+`grammers-session` is built with `default-features = false` and `libsql` never
+enters the dependency graph. **Do not re-enable `sqlite-storage`.**
+
+Authorization keys are written through immediately; everything else is batched
+behind a dirty flag and flushed by the engine's housekeeping tick.
+
+## Traps discovered the hard way
+
+- **`RpcError::name` has the number stripped out.** `FLOOD_WAIT_42` arrives as
+  `name = "FLOOD_WAIT"`, `value = Some(42)`. Matching `is("FLOOD_WAIT_*")`
+  silently never fires. There is a regression test for exactly this.
+- **`RpcError::is` only understands a leading or trailing `*`.** A middle
+  wildcard like `CHAT_SEND_*_FORBIDDEN` degrades into an exact comparison that
+  never matches. Use the common prefix.
+- **`forward_messages` can partially succeed**, returning `None` for messages it
+  refused. Treating that as success loses half an album, so it is converted into
+  a failure that degrades to a copy.
+- **Config stores Bot API dialog IDs** (`-100…`), but every API call needs a
+  `PeerRef` (ID *plus* the access hash bound to this account). The bridge is the
+  session peer cache, warmed by `dialogs::fetch_all`. Calling it after login is
+  not optional — `grammers` also needs it to resolve update gaps.
+
+## Conventions
+
+- All code, comments and documentation are **English**. This is an open-source
+  project.
+- Comments explain *why*, not *what*. If a line needs a comment to say what it
+  does, rename something instead.
+- Tests live next to the code in `#[cfg(test)] mod tests`. Test names are
+  sentences: `a_deleted_source_degrades_to_the_snapshot`.
+- Prefer removing dead code over `#[allow(dead_code)]`.
+- `unsafe` is forbidden crate-wide, including in tests. If a test seems to need
+  it (e.g. `env::set_var`), restructure the code so it does not.
+
+## Commands
+
+```sh
+cargo test                    # 88 tests, all offline
+cargo clippy --all-targets    # must be clean; pedantic is on
+cargo fmt
+cargo run -- --help
+```
+
+Exceptions to clippy's pedantic set live in `Cargo.toml` under `[lints.clippy]`,
+each with a written justification. Add to that list only with a reason.
+
+## Not done yet
+
+CI, release packaging, and publishing to crates.io are deliberately out of scope
+so far. Reconnection on network loss relies on `grammers`' own retry policy and
+has not been tested against a long outage.

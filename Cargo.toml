@@ -1,0 +1,109 @@
+[package]
+name = "telegram-forwarder"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Many-to-many Telegram channel forwarder built for messages that get deleted seconds after they are posted"
+authors = ["telegram-forwarder contributors"]
+license = "MIT"
+repository = "https://github.com/your-name/telegram-forwarder"
+keywords = ["telegram", "mtproto", "forwarder", "cli"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "tgfwd"
+path = "src/main.rs"
+
+[dependencies]
+# Telegram MTProto stack.
+#
+# `grammers-session` is deliberately built with `default-features = false`: the default
+# `sqlite-storage` feature drags in `libsql`, and this project persists its session in a
+# single JSON file instead (see `src/session`). The `serde` feature is what makes that
+# possible, since it derives Serialize/Deserialize on the session's own types.
+grammers-client = "0.10"
+grammers-session = { version = "0.10", default-features = false, features = ["serde"] }
+grammers-tl-types = "0.10"
+
+# Async runtime.
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "sync",
+    "time",
+    "fs",
+    "io-util",
+] }
+futures = "0.3"
+
+# CLI surface.
+clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4"
+inquire = "0.9"
+ratatui = "0.30"
+owo-colors = "4"
+
+# Diagnostics.
+color-eyre = "0.6"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-log = "0.2"
+
+# Configuration and state.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+humantime-serde = "1"
+directories = "6"
+fs-err = "3"
+indexmap = { version = "2", features = ["serde"] }
+
+# Runtime plumbing.
+governor = "0.10"
+dashmap = "6"
+chrono = "0.4"
+rand = "0.9"
+unicode-width = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+# `unreachable_pub` is deliberately not enabled: this is a binary crate, so every
+# `pub` item is unreachable from outside by definition and the lint fires on all
+# of them without saying anything useful.
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# The codebase is a binary, not a library: documenting every error/panic path on
+# private functions is noise rather than signal.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+# Telegram's API is i32/i64-heavy and casts between them are pervasive and checked
+# by context rather than by type.
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# Delivery futures are large because they carry snapshots and peer references.
+# Boxing them would add an allocation on the hot path to save stack that is only
+# touched once per message.
+large_futures = "allow"
+# `skip_serializing_if` requires a `&bool` signature, so the helper cannot take
+# its argument by value.
+trivially_copy_pass_by_ref = "allow"
+# `Paths` fields are all directories; the shared suffix is the point.
+struct_field_names = "allow"
+# Matching Telegram's payload types explicitly documents which are handled,
+# even where two arms currently agree.
+match_same_arms = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
