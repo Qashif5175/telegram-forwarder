@@ -85,6 +85,18 @@ behind a dirty flag and flushed by the engine's housekeeping tick.
   session peer cache, warmed by `dialogs::fetch_all`. Calling it after login is
   not optional — `grammers` also needs it to resolve update gaps.
 
+### Where files live
+
+Paths come from the `directories` crate, which follows the XDG spec on Linux,
+Apple's guidance on macOS and the Known Folder API on Windows. Do not replace
+this with a `~/.tgfwd` dotdir: it would be wrong on Windows and would violate the
+one part of this that has an actual written specification.
+
+The real problem those paths create — being unguessable, and containing a space
+on macOS — is solved by `tgfwd config path` and `tgfwd config edit`, not by
+moving the files. `TGFWD_HOME` overrides everything and lays a whole profile out
+under one root, which is what the tests and multi-account setups use.
+
 ## Conventions
 
 - All code, comments and documentation are **English**. This is an open-source
@@ -100,7 +112,7 @@ behind a dirty flag and flushed by the engine's housekeeping tick.
 ## Commands
 
 ```sh
-cargo test                    # 88 tests, all offline
+cargo test                    # 91 tests, all offline
 cargo clippy --all-targets    # must be clean; pedantic is on
 cargo fmt
 cargo run -- --help

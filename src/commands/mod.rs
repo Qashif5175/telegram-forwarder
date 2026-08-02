@@ -1,5 +1,6 @@
 //! Implementations of the CLI subcommands.
 
+pub mod config;
 pub mod route;
 pub mod start;
 
@@ -197,6 +198,7 @@ pub fn status(paths: &Paths) -> Result<()> {
     }
 
     route::print_routes(&config);
+    eprintln!("  {}", theme::dim("edit the file with `tgfwd config edit`"));
     Ok(())
 }
 

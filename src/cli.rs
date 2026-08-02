@@ -44,6 +44,12 @@ pub enum Command {
     /// Show the configured routes and account without connecting.
     Status,
 
+    /// Work with the configuration file directly.
+    Config {
+        #[command(subcommand)]
+        action: ConfigCommand,
+    },
+
     /// Check the configuration and connection for problems.
     Doctor,
 
@@ -52,6 +58,15 @@ pub enum Command {
         /// Shell to generate completions for.
         shell: Shell,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    /// Open the configuration file in your editor.
+    Edit,
+
+    /// Print the path to the configuration file, for scripts and editors.
+    Path,
 }
 
 #[derive(Debug, Subcommand)]

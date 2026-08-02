@@ -29,7 +29,10 @@ pub struct Config {
     pub defaults: Defaults,
 
     /// Forwarding rules. Order is preserved and is the order shown in the UI.
-    #[serde(default, rename = "route")]
+    ///
+    /// Skipped when empty so a freshly generated file does not open with a
+    /// bare `route = []` above everything else.
+    #[serde(default, rename = "route", skip_serializing_if = "Vec::is_empty")]
     pub routes: Vec<Route>,
 }
 

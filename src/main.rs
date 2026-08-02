@@ -13,7 +13,7 @@ mod ui;
 use clap::Parser;
 use color_eyre::eyre::Result;
 
-use crate::cli::{Cli, Command, RouteCommand};
+use crate::cli::{Cli, Command, ConfigCommand, RouteCommand};
 use crate::config::Paths;
 use crate::ui::prompts;
 use crate::ui::theme::{self, Level};
@@ -60,6 +60,13 @@ async fn dispatch(cli: Cli) -> Result<()> {
         Command::Login => commands::login(&paths).await,
         Command::Logout => commands::logout(&paths).await,
         Command::Status => commands::status(&paths),
+        Command::Config { action } => match action {
+            ConfigCommand::Edit => commands::config::edit(&paths),
+            ConfigCommand::Path => {
+                commands::config::path(&paths);
+                Ok(())
+            }
+        },
         Command::Doctor => commands::doctor(&paths).await,
         Command::Completions { shell } => {
             commands::completions(shell);

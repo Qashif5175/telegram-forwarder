@@ -81,6 +81,8 @@ in flight, what is currently sitting out a rate limit, and a live event feed.
 | `tgfwd route enable` / `disable` | toggle a route without deleting it |
 | `tgfwd route sync` | refresh the chat names stored in the config |
 | `tgfwd start [--tui] [--catch-up]` | run the forwarder |
+| `tgfwd config edit` | open the config file in `$EDITOR`, then check it |
+| `tgfwd config path` | print the config file's path |
 | `tgfwd status` | show config, account and routes without connecting |
 | `tgfwd doctor` | check for problems, including chats that are no longer reachable |
 | `tgfwd completions <shell>` | shell completion script |
@@ -122,7 +124,20 @@ tgfwd route enable breaking-news    # no prompt, works in cron
 ## Configuration
 
 `tgfwd route add` writes the config for you, but it is plain TOML and meant to be
-readable. `tgfwd status` prints its location.
+readable and hand-editable.
+
+It lives wherever your platform says application data belongs — XDG directories
+on Linux, `Application Support` on macOS, `%APPDATA%` on Windows. Rather than
+memorise that, let the tool find it:
+
+```sh
+tgfwd config edit               # opens $EDITOR, then re-checks what you saved
+tgfwd config path               # just the path, for scripts
+$EDITOR "$(tgfwd config path)"  # quotes matter: the macOS path has a space
+```
+
+`config edit` creates a commented starting file if none exists, and refuses to
+stay quiet if what you saved no longer parses or no longer makes sense.
 
 ```toml
 [telegram]
@@ -195,7 +210,7 @@ chats you are in and read channels you have merely joined. Two consequences:
 ## Development
 
 ```sh
-cargo test                    # 88 tests, all offline
+cargo test                    # 91 tests, all offline
 cargo clippy --all-targets    # clean, with pedantic lints on
 cargo fmt
 ```
