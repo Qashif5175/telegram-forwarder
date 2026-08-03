@@ -1,12 +1,10 @@
-# tgfwd
+# telegram-forwarder
 
-Many-to-many Telegram forwarding, built for messages that get deleted seconds
-after they are posted.
+Mirror Telegram messages from any number of chats into any number of other chats
+— built for publishers who post and then delete seconds later.
 
-Point it at any number of source chats and any number of targets. When something
-is posted, it is captured locally *before* anything else happens, then delivered
-to every target in parallel. If the publisher deletes the post one second later,
-the delivery still completes.
+The command is called **`tgfwd`**. That is the binary this repository builds;
+`telegram-forwarder` is the project and crate name.
 
 ```
 📢 Breaking News  ─┐          ┌─→ 👥 Team channel
@@ -14,10 +12,17 @@ the delivery still completes.
 👤 A contact      ─┘          └─→ 👥 Archive group
 ```
 
-## Why it survives a deletion
+## What problem this solves
 
-A native Telegram forward needs the source message to still exist. If it is gone,
-the forward fails and the message is lost. `tgfwd` walks down a ladder instead:
+A native Telegram forward needs the source message to still exist. Point a
+scheduler at a channel that deletes its posts a second after publishing them and
+you get nothing: by the time the forward is issued, there is nothing to forward.
+
+`tgfwd` copies the message into memory the instant the update arrives — before
+filtering, before routing, before any network call — and only then decides what
+to do with it. Deleting the source afterwards cannot take it back.
+
+If the forward fails, delivery walks down a ladder instead of giving up:
 
 | | What it does | Cost | Survives |
 |---|---|---|---|
@@ -25,72 +30,155 @@ the forward fails and the message is lost. `tgfwd` walks down a ladder instead:
 | **Copy** | re-sends as your own message, reusing the original media | 1 request | the source being deleted, and channels that forbid forwarding |
 | **Rehost** | re-sends using bytes captured locally | uploads | the file reference expiring |
 
-The important detail: **Copy does not re-upload anything.** It reuses the file
-reference Telegram already gave us, so falling back costs the same as a forward.
-That is why `auto` — try to keep attribution, fall back instantly if you cannot —
-is the default rather than a slow safety net.
+The detail that makes this practical: **Copy does not re-upload anything.** It
+reuses the file reference Telegram already handed over, so falling back costs the
+same as a forward. That is why `auto` — keep attribution when you can, fall back
+instantly when you cannot — is the default rather than a slow safety net.
 
-Deliveries that only succeeded because of the fallback are counted separately as
+Messages that only arrived because of a fallback are counted separately as
 **rescued**, so you can see how often it actually mattered.
+
+## Requirements
+
+- [rustup](https://rustup.rs). The toolchain is pinned in `rust-toolchain.toml`,
+  so a fresh clone builds with no further setup.
+- A **Telegram account** (not a bot — see [Why a user account](#why-a-user-account)).
+- Your own Telegram **API key**, which is free and takes about a minute to get.
+  The next section is entirely about that, because it is the one part nobody can
+  do for you.
+
+No database, no C toolchain, no native dependencies. The build produces a single
+binary and the session is one JSON file.
 
 ## Install
 
-Requires [rustup](https://rustup.rs). The toolchain is pinned, so a fresh clone
-builds with no further setup.
-
 ```sh
-git clone <this repo> && cd telegram-forwarder
+git clone https://github.com/awdr74100/telegram-forwarder
+cd telegram-forwarder
 cargo build --release
 ./target/release/tgfwd --help
 ```
 
-There is no database and no native dependency: the session is one JSON file and
-the build produces a single binary.
-
-## Getting started
+Put it on your `PATH` if you want to type `tgfwd` instead of the full path:
 
 ```sh
-tgfwd login          # walks you through getting an API key, then signs in
+cargo install --path .
+```
+
+## Where the login details come from
+
+Three separate things are involved, and it is worth knowing which is which:
+
+### 1. An API key identifies the *application*
+
+Telegram requires every third-party client to register. This key cannot be
+shipped inside a public binary, so you create your own:
+
+1. Open <https://my.telegram.org/auth> and sign in with your phone number.
+2. Choose **API development tools**.
+3. Create an application. Any name and description will do — nobody reviews it.
+4. Copy the **`api_id`** (a number) and **`api_hash`** (32 hex characters).
+
+`tgfwd login` prints these steps and then prompts for both values, so you do not
+have to do this in advance. They are written to the config file, not compiled in.
+
+These identify the app, not you. They are not a password, but they are yours and
+are not meant to be committed anywhere.
+
+### 2. Your phone number and login code identify *you*
+
+`tgfwd login` then asks for:
+
+- your phone number in international format, e.g. `+886912345678`;
+- the **login code** Telegram sends to your other signed-in devices (not SMS, if
+  you have another device active);
+- your **two-factor password**, if you have one set. Your own hint is shown.
+
+A mistyped code or password is re-asked up to three times against the same
+request, because asking Telegram for a fresh code is rate-limited far more
+aggressively than retrying one.
+
+### 3. The session file is what stays behind
+
+On success, the resulting authorization key is stored so you never repeat the
+above. **That file is a live credential**: whoever copies it is signed into your
+account. It is written `chmod 600`, created with those permissions rather than
+tightened afterwards, and `tgfwd logout` revokes it server-side and deletes it.
+
+## Where your data lives
+
+Nothing is stored in the project directory. Paths follow each platform's
+convention, which means they are not guessable — so ask the tool instead of
+memorising them:
+
+```sh
+tgfwd status                    # everything, in human form
+tgfwd config path               # just the config path, for scripts
+tgfwd config edit               # open it in $EDITOR, then re-check what you saved
+$EDITOR "$(tgfwd config path)"  # quotes matter: the macOS path contains a space
+```
+
+| | What it is | macOS | Linux |
+|---|---|---|---|
+| `config.toml` | your API key and routes | `~/Library/Application Support/tgfwd/` | `~/.config/tgfwd/` |
+| `session.json` | the authorization key — a live credential | `~/Library/Application Support/tgfwd/` | `~/.local/share/tgfwd/` |
+| media cache | snapshotted bytes, safe to delete | `~/Library/Caches/tgfwd/` | `~/.cache/tgfwd/` |
+
+On Windows these resolve under `%APPDATA%` and `%LOCALAPPDATA%`. Rather than
+trust this table, run `tgfwd status` — it prints the real answer for your machine.
+
+### Multiple accounts
+
+`TGFWD_HOME` overrides all of it and lays one profile out under a single root,
+which is also the safe way to experiment without touching your real setup:
+
+```sh
+TGFWD_HOME=~/.tgfwd-work tgfwd login
+TGFWD_HOME=~/.tgfwd-work tgfwd start
+```
+
+## Quick start
+
+```sh
+tgfwd login          # API key walkthrough, then phone + code
 tgfwd route add      # pick sources and targets from a searchable list
 tgfwd start          # go
 ```
 
-You never type a chat ID. `route add` lists the chats your account is actually
-in, searchable by name, `@username` or ID, and marks the channels you do not have
-posting rights in before you pick them.
+**You never type a chat ID.** `route add` lists the chats your account is
+actually in, searchable by name, `@username` or ID, and flags the channels you do
+not have posting rights in *before* you pick them:
 
-### Watching it run
-
-```sh
-tgfwd start          # colourful log lines
-tgfwd start --tui    # full-screen dashboard
+```
+? Which chats should be watched?
+❯ ◻ 📢 台灣科技新聞      @twtech      -1001234567890
+  ◻ 📢 Breaking News     @news        -1009876543210
+  ◻ 👥 Team channel      —            -1005555555555  (no post rights)
 ```
 
-The dashboard shows per-route throughput, how many messages were rescued, what is
-in flight, what is currently sitting out a rate limit, and a live event feed.
+This is deliberate: chat titles are full of emoji and symbols nobody can retype
+from memory, and a mistyped ID fails silently at delivery time — the worst
+possible moment to find out.
 
-## Commands
+## What a route is
 
-| Command | Purpose |
-|---|---|
-| `tgfwd login` / `logout` | manage the session |
-| `tgfwd route add` | create a route interactively |
-| `tgfwd route list` | show configured routes |
-| `tgfwd route edit` | change a route's sources, targets, mode or filter |
-| `tgfwd route remove` | delete a route |
-| `tgfwd route enable` / `disable` | toggle a route without deleting it |
-| `tgfwd route sync` | refresh the chat names stored in the config |
-| `tgfwd start [--tui] [--catch-up]` | run the forwarder |
-| `tgfwd config edit` | open the config file in `$EDITOR`, then check it |
-| `tgfwd config path` | print the config file's path |
-| `tgfwd status` | show config, account and routes without connecting |
-| `tgfwd doctor` | check for problems, including chats that are no longer reachable |
-| `tgfwd completions <shell>` | shell completion script |
+A route is one rule: **these source chats → these target chats**, plus how to
+deliver and what to filter. Sources and targets are both lists, so one route can
+fan several channels into several destinations.
 
-**You never have to type anything you cannot see.** Run any of the route
-commands with nothing after it. Each one opens a picker showing what your routes
-actually move — which matters because chat names routinely contain emoji and
-symbols nobody can type from memory:
+Each route gets a short name generated from its first source chat. You are never
+asked to invent one; it exists only so logs, the dashboard and shell scripts have
+something stable to refer to.
+
+```sh
+tgfwd route list      # see them
+tgfwd route edit      # change sources, targets, delivery mode or filter
+tgfwd route disable   # switch one off without deleting it
+tgfwd route sync      # refresh the chat names stored in the config
+```
+
+Run any of these with no arguments and you get a picker showing what each route
+*moves*, not its name:
 
 ```
 $ tgfwd route edit
@@ -106,38 +194,68 @@ $ tgfwd route edit
   Filter         (2 required, 1 blocked)
 ```
 
-<details>
-<summary>Scripting these commands</summary>
+Editing a filter starts from the filter you already have — existing keywords come
+back in the input buffer rather than needing to be retyped.
 
-Each route gets a short name, generated from its source chat — you are never
-asked to invent one. It exists so logs, the dashboard and shell scripts have
-something stable to refer to, and it lets the same commands run unattended:
+<details>
+<summary>Naming a route explicitly, for scripts and cron</summary>
 
 ```sh
-tgfwd route enable breaking-news    # no prompt, works in cron
+tgfwd route enable breaking-news    # no prompt, works unattended
+tgfwd route list                    # shows the names
 ```
-
-`tgfwd route list` shows the names.
 
 </details>
 
-## Configuration
+## Filtering
 
-`tgfwd route add` writes the config for you, but it is plain TOML and meant to be
-readable and hand-editable.
+Optional, per route. Every condition is ANDed, and keyword matching is
+case-insensitive substring matching — no regex dialect to learn.
 
-It lives wherever your platform says application data belongs — XDG directories
-on Linux, `Application Support` on macOS, `%APPDATA%` on Windows. Rather than
-memorise that, let the tool find it:
+| Setting | Effect |
+|---|---|
+| `include` | message must contain at least one of these |
+| `exclude` | message is dropped if it contains any of these |
+| `kinds` | only these media kinds pass (`photo`, `video`, `document`, …) |
+| `require_media` | drop plain-text messages |
+| `skip_forwarded` | drop messages that are themselves forwards |
+
+For an album, all of the captions are considered together, so a keyword sitting
+on the third photo still counts.
+
+## Running it
 
 ```sh
-tgfwd config edit               # opens $EDITOR, then re-checks what you saved
-tgfwd config path               # just the path, for scripts
-$EDITOR "$(tgfwd config path)"  # quotes matter: the macOS path has a space
+tgfwd start              # colourful log lines
+tgfwd start --tui        # full-screen dashboard
+tgfwd start --catch-up   # also process messages that arrived while it was stopped
 ```
 
-`config edit` creates a commented starting file if none exists, and refuses to
-stay quiet if what you saved no longer parses or no longer makes sense.
+The dashboard shows per-route throughput, how many messages were rescued, what is
+in flight, what is sitting out a rate limit, and a live event feed. Log output is
+held back while it is open and replayed when you quit, so nothing is lost and
+nothing paints over the display.
+
+**Stopping.** `Ctrl+C` finishes in-flight deliveries first, which can take a
+moment if one is waiting out a server-issued rate limit. Press it a second time
+to leave immediately.
+
+**Exit codes** — useful under `systemd`, `launchd` or a supervisor:
+
+| Code | Meaning |
+|---|---|
+| `0` | stopped cleanly |
+| `1` | configuration or connection problem, explained on stderr |
+| `130` | interrupted, or a prompt was cancelled |
+
+Losing the connection to Telegram is an error, not a clean stop, so a supervisor
+will restart rather than assume all is well.
+
+## Configuration
+
+`tgfwd route add` writes this for you, but it is plain TOML and meant to be read
+and edited by hand. `tgfwd config edit` opens it and **re-validates on save**, so
+a mistake is caught there rather than at the next start.
 
 ```toml
 [telegram]
@@ -149,14 +267,14 @@ mode = "auto"                     # auto | copy | forward
 
 [defaults.snapshot]
 enabled = true                    # download media as deletion insurance
-max_bytes = 52428800              # skip files larger than this
+max_bytes = 52428800              # skip files larger than this; 0 disables the limit
 ttl = "1h"                        # how long snapshots stay on disk
 
 [defaults.dispatch]
 per_target_interval = "300ms"     # minimum gap per destination chat
-max_attempts = 5
-max_flood_wait = "5m"             # refuse waits longer than this
-max_in_flight = 64
+max_attempts = 5                  # per delivery strategy
+max_flood_wait = "5m"             # refuse server-requested waits longer than this
+max_in_flight = 64                # concurrent deliveries across all routes
 
 [[route]]
 id = "news-mirror"
@@ -168,60 +286,98 @@ targets = [
 ]
 
 [route.filter]
-include = ["urgent", "快訊"]      # keep messages containing any of these
-exclude = ["sponsored"]           # drop messages containing any of these
+include = ["urgent", "快訊"]
+exclude = ["sponsored"]
 require_media = false
 skip_forwarded = false
 ```
 
-Chat IDs use the `-100…` form you see in Telegram Desktop. Titles are labels
-only — `tgfwd route sync` refreshes them.
+Anything under `[defaults]` can be overridden per route. Chat IDs use the `-100…`
+form Telegram Desktop shows; titles are labels only, refreshed by
+`tgfwd route sync`.
 
-Pacing is enforced **per target chat**, so fanning out to ten channels happens at
-full speed while a single busy channel is throttled on its own.
-
-### Multiple profiles
-
-Every path is relative to `TGFWD_HOME`, so separate accounts stay separate:
-
-```sh
-TGFWD_HOME=~/.tgfwd-work tgfwd start
-```
+Pacing is enforced **per target chat**, so fanning out to ten channels runs at
+full speed while one busy channel is throttled on its own.
 
 ## Loop protection
 
 Forwarding chains can multiply messages without end, so two things prevent it:
 
-- Configuration is rejected if the routes form a cycle (`A → B` and `B → A`).
+- Configuration is rejected if the routes form a cycle (`A → B` plus `B → A`).
 - At runtime, messages this tool produced are remembered and never treated as new
-  source material — so `A → B` plus `B → C` does not re-forward your own delivery.
+  source material, so `A → B` plus `B → C` does not re-forward your own delivery.
 
-## A note on accounts
+## Why a user account
 
-This signs in as **you**, not as a bot, because only a user account can list the
-chats you are in and read channels you have merely joined. Two consequences:
+Only a user account can list the chats you are in and read channels you have
+merely joined; a bot cannot enumerate its own dialogs, which would force you back
+to pasting chat IDs. Two consequences worth stating plainly:
 
-- The session file is a live credential. It is stored `chmod 600`, and anyone who
-  copies it is logged into your account. `tgfwd logout` revokes it.
-- Automating a user account is your responsibility under Telegram's terms.
-  Sensible pacing defaults are set, but forwarding aggressively to many chats can
+- The session file is a live credential (see [above](#3-the-session-file-is-what-stays-behind)).
+- Automating a user account is your responsibility under Telegram's terms. The
+  defaults pace conservatively, but forwarding aggressively into many chats can
   still get an account limited.
+
+## Troubleshooting
+
+Start here:
+
+```sh
+tgfwd doctor
+```
+
+It checks that the config parses, that the routes are consistent, that
+credentials are present, that a session exists, and that **every configured chat
+is still reachable by this account** — which is the failure people hit most, and
+the one that is otherwise invisible until a delivery fails.
+
+| Symptom | Likely cause |
+|---|---|
+| `… is not reachable by this account` | the account left the chat, or the cache is stale — run `tgfwd login` to refresh it |
+| Nothing is forwarded | check the route is enabled (`tgfwd route list`) and the filter is not rejecting everything |
+| Only some targets receive | usually a permissions problem in that one chat; `tgfwd doctor` names it |
+| Constantly rate-limited | raise `defaults.dispatch.per_target_interval` |
+
+`-v` adds this tool's debug output; `-vv` adds the underlying Telegram stack.
+`RUST_LOG` overrides both if you want finer control.
 
 ## Development
 
 ```sh
-cargo test                    # 109 tests, all offline
-cargo clippy --all-targets    # clean, with pedantic lints on
-cargo fmt
+cargo test                    # 109 tests, all offline — no network, no account
+cargo clippy --all-targets    # must be clean; pedantic lints are on
+cargo fmt                     # or `cargo fmt --check` to verify without writing
+typos                         # spell check; cargo install typos-cli
 ```
 
-See [AGENTS.md](AGENTS.md) for the architecture and the reasoning behind it.
+The toolchain is pinned in `rust-toolchain.toml`, so `rustup` installs the right
+version automatically on first build — there is no setup step. Clippy runs with
+`pedantic` enabled; the handful of exceptions live in `Cargo.toml` under
+`[lints.clippy]`, each with a written reason. `unsafe` is forbidden crate-wide,
+including in tests.
+
+Tests live beside the code in `#[cfg(test)] mod tests` and are named as
+sentences, e.g. `a_deleted_source_degrades_to_the_snapshot`.
+
+To try changes against a real account without touching your own setup, point
+`TGFWD_HOME` somewhere disposable:
+
+```sh
+export TGFWD_HOME=/tmp/tgfwd-test
+cargo run -- login
+cargo run -- route add
+cargo run -- start
+rm -rf /tmp/tgfwd-test        # start over
+```
+
+[AGENTS.md](AGENTS.md) documents the architecture, the design rules that must not
+be broken, and the Telegram API traps that cost the most to discover.
 
 ## Status
 
-Working and tested, but young. Not yet done: CI, published binaries, and
-long-outage reconnection testing.
+Working, but young. Not yet done: CI, published binaries, and testing against a
+long network outage.
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026-present Roya
