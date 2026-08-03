@@ -28,8 +28,44 @@ pub enum Disposition {
     /// A transient fault with no server-supplied delay. Back off and retry.
     Backoff,
 
-    /// Nothing will make this work. Report it and move on.
-    Fatal(&'static str),
+    /// Nothing will make this work as it stands. Report it and move on.
+    Fatal(Fatal),
+}
+
+/// A refusal no retry will talk Telegram out of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fatal {
+    /// A short explanation for the user.
+    pub reason: &'static str,
+
+    /// Whether the same content might be accepted in smaller pieces.
+    ///
+    /// This is the difference between a rejected *request* and a rejected
+    /// *destination*. One grouping the chat will not take, or one media kind
+    /// among several it forbids, can still get through a piece at a time. A chat
+    /// this account cannot write to refuses every piece just as firmly, and
+    /// splitting a rate limit into more requests only produces more rate limit —
+    /// so acting on the distinction is what keeps a fallback from making a bad
+    /// situation worse.
+    pub retry_smaller: bool,
+}
+
+impl Fatal {
+    /// The destination or the account is the problem; smaller will not help.
+    const fn destination(reason: &'static str) -> Self {
+        Self {
+            reason,
+            retry_smaller: false,
+        }
+    }
+
+    /// This particular request was refused; a smaller one might not be.
+    const fn request(reason: &'static str) -> Self {
+        Self {
+            reason,
+            retry_smaller: true,
+        }
+    }
 }
 
 /// Why a strategy was abandoned, and what it says about the next attempt.
@@ -68,7 +104,8 @@ pub fn classify(error: &InvocationError) -> Disposition {
         return match error {
             // The connection was torn down, usually because we are shutting
             // down. Nothing to retry against.
-            InvocationError::Dropped => Disposition::Fatal("connection closed"),
+            // Nothing to send it down, in any size.
+            InvocationError::Dropped => Disposition::Fatal(Fatal::destination("connection closed")),
             // Transport and IO faults are exactly what backoff is for.
             _ => Disposition::Backoff,
         };
@@ -114,37 +151,50 @@ pub fn classify(error: &InvocationError) -> Disposition {
     }
 
     // Permission and identity problems: no amount of retrying helps.
-    //
+    if rpc.is("CHAT_WRITE_FORBIDDEN") {
+        return Disposition::Fatal(Fatal::destination("no permission to post in this chat"));
+    }
     // `is` only understands a leading or trailing `*`, so the family of
-    // `CHAT_SEND_<kind>_FORBIDDEN` errors is matched by its common prefix.
-    if rpc.is("CHAT_WRITE_FORBIDDEN") || rpc.is("CHAT_SEND_*") {
-        return Disposition::Fatal("no permission to post in this chat");
+    // `CHAT_SEND_<kind>_FORBIDDEN` errors is matched by its common prefix. These
+    // are per media kind, so a post carrying several kinds can still get its
+    // permitted ones through one at a time.
+    if rpc.is("CHAT_SEND_*") {
+        return Disposition::Fatal(Fatal::request("this chat forbids that kind of media"));
     }
     if rpc.is("CHAT_ADMIN_REQUIRED") {
-        return Disposition::Fatal("posting here requires admin rights");
+        return Disposition::Fatal(Fatal::destination("posting here requires admin rights"));
     }
     if rpc.is("CHANNEL_PRIVATE") {
-        return Disposition::Fatal("this account is not a member of the chat");
+        return Disposition::Fatal(Fatal::destination(
+            "this account is not a member of the chat",
+        ));
     }
     if rpc.is("USER_BANNED_IN_CHANNEL") {
-        return Disposition::Fatal("this account is banned from the chat");
+        return Disposition::Fatal(Fatal::destination("this account is banned from the chat"));
     }
     if rpc.is("PEER_ID_INVALID") {
-        return Disposition::Fatal("the chat is unknown to this account");
+        return Disposition::Fatal(Fatal::destination("the chat is unknown to this account"));
     }
     if rpc.is("AUTH_KEY_*") || rpc.is("SESSION_REVOKED") || rpc.is("USER_DEACTIVATED*") {
-        return Disposition::Fatal("the session is no longer valid; log in again");
+        return Disposition::Fatal(Fatal::destination(
+            "the session is no longer valid; log in again",
+        ));
     }
+    // One overlong caption sinks the whole request, but each piece carries only
+    // its own.
     if rpc.is("MEDIA_CAPTION_TOO_LONG") {
-        return Disposition::Fatal("the caption is too long for this account tier");
+        return Disposition::Fatal(Fatal::request(
+            "the caption is too long for this account tier",
+        ));
     }
 
     // A server-side fault is worth retrying; anything else in the 400 range is
-    // a request we should not repeat unchanged.
+    // a request we should not repeat unchanged — though a different, smaller
+    // one is not the same request.
     if rpc.code >= 500 {
         Disposition::Backoff
     } else {
-        Disposition::Fatal("the request was rejected")
+        Disposition::Fatal(Fatal::request("the request was rejected"))
     }
 }
 

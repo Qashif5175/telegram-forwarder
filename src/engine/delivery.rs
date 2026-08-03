@@ -220,7 +220,11 @@ impl Dispatcher {
         // one at a time gives up the grouping and nothing else, which beats
         // giving up the post.
         walk = match walk {
-            Walk::Incomplete { remaining, reason } if remaining.len() > 1 => {
+            Walk::Incomplete {
+                remaining,
+                reason,
+                retry_smaller: true,
+            } if remaining.len() > 1 => {
                 tracing::warn!(
                     chat = %target.label,
                     parts = remaining.len(),
@@ -235,7 +239,9 @@ impl Dispatcher {
 
         let (strategy, rescued) = match walk {
             Walk::Delivered { strategy, rescued } => (strategy, rescued),
-            Walk::Incomplete { remaining, reason } => {
+            Walk::Incomplete {
+                remaining, reason, ..
+            } => {
                 return Err(self.report_failure(route, target, total, remaining.len(), &reason));
             }
         };
@@ -313,9 +319,11 @@ impl Dispatcher {
                 strategy,
                 rescued: true,
             },
+            // Already tried one at a time; there is nothing smaller left.
             _ => Walk::Incomplete {
                 remaining: missing,
                 reason,
+                retry_smaller: false,
             },
         }
     }
@@ -374,10 +382,14 @@ impl Dispatcher {
                     last_error = Some(reason.reason().to_owned());
                 }
 
-                Outcome::Failed(message) => {
+                Outcome::Failed {
+                    reason,
+                    retry_smaller,
+                } => {
                     return Walk::Incomplete {
                         remaining: payload.snapshots,
-                        reason: message,
+                        reason,
+                        retry_smaller,
                     };
                 }
             }
@@ -386,6 +398,11 @@ impl Dispatcher {
         Walk::Incomplete {
             remaining: payload.snapshots,
             reason: last_error.unwrap_or_else(|| "every delivery strategy failed".to_owned()),
+            // A rung having accepted part of the group is direct evidence that
+            // its members are acceptable on their own. Without that evidence,
+            // every rung refused the whole thing outright and splitting is a
+            // guess paid for in extra requests.
+            retry_smaller: recovered_parts,
         }
     }
 
@@ -446,8 +463,13 @@ impl Dispatcher {
                     Ok(ids) => Ok(ids),
                     // A missing snapshot is not a Telegram failure, so it cannot
                     // be classified; it simply ends the ladder.
+                    // No bytes anywhere in the payload; splitting it cannot
+                    // conjure any.
                     Err(RehostError::NoBytes) => {
-                        return Outcome::Failed("no snapshot available to re-upload".to_owned());
+                        return Outcome::Failed {
+                            reason: "no snapshot available to re-upload".to_owned(),
+                            retry_smaller: false,
+                        };
                     }
                     Err(RehostError::Api(err)) => Err(err),
                 },
@@ -477,10 +499,15 @@ impl Dispatcher {
                 Err(error) => match failure::classify(&error) {
                     Disposition::Wait(delay) => {
                         if delay > self.policy.max_flood_wait {
-                            return Outcome::Failed(format!(
-                                "Telegram asked for a {}s wait, beyond the configured limit",
-                                delay.as_secs()
-                            ));
+                            // Splitting a rate limit into more requests produces
+                            // more rate limit, not delivery.
+                            return Outcome::Failed {
+                                reason: format!(
+                                    "Telegram asked for a {}s wait, beyond the configured limit",
+                                    delay.as_secs()
+                                ),
+                                retry_smaller: false,
+                            };
                         }
                         tracing::warn!(
                             target_chat = %target.label,
@@ -497,15 +524,22 @@ impl Dispatcher {
 
                     Disposition::Degrade(reason) => return Outcome::Degraded(reason),
 
-                    Disposition::Fatal(message) => return Outcome::Failed(message.to_owned()),
+                    Disposition::Fatal(fatal) => {
+                        return Outcome::Failed {
+                            reason: fatal.reason.to_owned(),
+                            retry_smaller: fatal.retry_smaller,
+                        };
+                    }
                 },
             }
         }
 
-        Outcome::Failed(format!(
-            "gave up after {} attempts",
-            self.policy.max_attempts
-        ))
+        // The retry budget is spent. Spending it again per part would multiply
+        // the same transient failure.
+        Outcome::Failed {
+            reason: format!("gave up after {} attempts", self.policy.max_attempts),
+            retry_smaller: false,
+        }
     }
 
     /// Strategy 1: a native Telegram forward.
@@ -735,6 +769,8 @@ enum Walk {
     Incomplete {
         remaining: Vec<Arc<Snapshot>>,
         reason: String,
+        /// Whether sending them one at a time is worth trying.
+        retry_smaller: bool,
     },
 }
 
@@ -747,8 +783,12 @@ enum Outcome {
     Partial(Vec<Arc<Snapshot>>),
     /// This strategy cannot work; try the next rung down.
     Degraded(Degrade),
-    /// Nothing further will help.
-    Failed(String),
+    /// Nothing further will help for this payload as it stands.
+    Failed {
+        reason: String,
+        /// Whether the same content might still be accepted in smaller pieces.
+        retry_smaller: bool,
+    },
 }
 
 /// Rehosting can fail for a reason that is not a Telegram error.
@@ -802,35 +842,62 @@ mod tests {
         assert_eq!(sent.refused.len(), 3);
     }
 
+    /// Whether `deliver` would break this refusal up and send the parts alone.
+    ///
+    /// Mirrors the guard in `deliver`; the point of the test is that the guard
+    /// is narrow, because the fallback costs one request per part.
+    fn would_split(walk: &Walk) -> bool {
+        matches!(
+            walk,
+            Walk::Incomplete {
+                remaining,
+                retry_smaller: true,
+                ..
+            } if remaining.len() > 1
+        )
+    }
+
+    fn refusal(parts: usize, reason: &str, retry_smaller: bool) -> Walk {
+        Walk::Incomplete {
+            remaining: (0..parts)
+                .map(|id| Arc::new(Snapshot::for_test(i32::try_from(id).unwrap(), "")))
+                .collect(),
+            reason: reason.to_owned(),
+            retry_smaller,
+        }
+    }
+
     #[test]
-    fn a_group_that_cannot_travel_as_a_group_falls_back_to_its_parts() {
-        // Telegram albums have to be homogeneous, so a post mixing a photo with
-        // a document is one that no rung can ever send as a single unit. The
-        // members are still perfectly sendable one at a time, and the fallback
-        // is only worth running when there is more than one of them.
-        let refused: Vec<Arc<Snapshot>> = (1..=3)
-            .map(|id| Arc::new(Snapshot::for_test(id, "")))
-            .collect();
+    fn a_rejected_group_is_delivered_as_its_parts() {
+        // Albums have to be homogeneous, so a post mixing kinds is one no rung
+        // can send as a unit even though every member is sendable alone.
+        assert!(would_split(&refusal(3, "the request was rejected", true)));
+    }
 
-        let group = Walk::Incomplete {
-            remaining: refused,
-            reason: "the request was rejected".to_owned(),
-        };
-        assert!(
-            matches!(&group, Walk::Incomplete { remaining, .. } if remaining.len() > 1),
-            "a multi-part refusal is what triggers delivering the parts separately"
-        );
+    #[test]
+    fn a_refusal_that_smaller_requests_cannot_fix_is_not_split() {
+        // This is the expensive mistake: the fallback costs one request per
+        // part, so spending it where the destination or the rate limit is the
+        // problem turns one refusal into several, during exactly the situation
+        // that least needs more traffic.
+        for reason in [
+            "Telegram asked for a 600s wait, beyond the configured limit",
+            "no permission to post in this chat",
+            "this account is banned from the chat",
+            "gave up after 5 attempts",
+        ] {
+            assert!(
+                !would_split(&refusal(3, reason, false)),
+                "{reason} must not be retried one part at a time"
+            );
+        }
+    }
 
-        // A lone message has no parts to fall back to; retrying it one at a time
-        // would just repeat the send that already failed.
-        let single = Walk::Incomplete {
-            remaining: vec![Arc::new(Snapshot::for_test(1, ""))],
-            reason: "the request was rejected".to_owned(),
-        };
-        assert!(
-            !matches!(&single, Walk::Incomplete { remaining, .. } if remaining.len() > 1),
-            "a single refused message must not be retried as a group of one"
-        );
+    #[test]
+    fn a_single_refused_message_is_never_split() {
+        // There are no parts to break it into; retrying would just repeat the
+        // send that already failed.
+        assert!(!would_split(&refusal(1, "the request was rejected", true)));
     }
 
     #[test]
