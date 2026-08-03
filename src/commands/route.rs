@@ -719,12 +719,36 @@ fn unknown_route(config: &Config, id: &str) -> String {
     )
 }
 
+/// The routes a picker should offer, as `(what it moves, its id)` pairs.
+fn selectable_routes(config: &Config, selectable: Selectable) -> Vec<(String, String)> {
+    config
+        .routes
+        .iter()
+        .filter(|route| selectable.accepts(route.enabled))
+        .map(|route| {
+            let state = if route.enabled { "" } else { "  [disabled]" };
+            (
+                format!("{}{state}", describe_route(route)),
+                route.id.clone(),
+            )
+        })
+        .collect()
+}
+
 /// Resolve a route name, prompting when it was not given on the command line.
+///
+/// The prompt appears even when only one route could be meant. Skipping it would
+/// save a keystroke and cost consistency: the same command would sometimes ask
+/// and sometimes not, depending on how many routes happen to exist, and the
+/// single-route case is precisely the one where nothing else on screen confirms
+/// which route is about to be edited, disabled or deleted.
 async fn resolve_route_id(
     config: &Config,
     id: Option<String>,
     selectable: Selectable,
 ) -> Result<String> {
+    // A name given on the command line is an answer already; scripts and cron
+    // jobs have no one to ask.
     if let Some(id) = id {
         return Ok(id);
     }
@@ -735,31 +759,10 @@ async fn resolve_route_id(
         bail!("{}", Selectable::Any.nothing_to_show());
     }
 
-    let candidates: Vec<&Route> = config
-        .routes
-        .iter()
-        .filter(|route| selectable.accepts(route.enabled))
-        .collect();
-
-    if candidates.is_empty() {
+    let options = selectable_routes(config, selectable);
+    if options.is_empty() {
         bail!("{}", selectable.nothing_to_show());
     }
-
-    // With exactly one sensible answer, asking is just a keystroke tax.
-    if let [only] = candidates.as_slice() {
-        return Ok(only.id.clone());
-    }
-
-    let options: Vec<(String, String)> = candidates
-        .iter()
-        .map(|route| {
-            let state = if route.enabled { "" } else { "  [disabled]" };
-            (
-                format!("{}{state}", describe_route(route)),
-                route.id.clone(),
-            )
-        })
-        .collect();
 
     prompts::select("Which route?", options).await
 }
@@ -927,15 +930,43 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn a_single_candidate_is_chosen_without_asking() {
-        // Prompting when there is exactly one possible answer is a keystroke tax,
-        // and this test would hang on a prompt if that regressed.
+    #[test]
+    fn a_lone_route_is_still_offered_for_selection() {
+        // Deliberately not short-circuited. The same command must behave the
+        // same way whether one route exists or ten, and with one route this
+        // prompt is the only thing confirming which route is about to be
+        // edited, disabled or deleted.
         let config = config_with(&[("only-one", false), ("already-on", true)]);
-        let picked = resolve_route_id(&config, None, Selectable::Disabled)
-            .await
-            .unwrap();
-        assert_eq!(picked, "only-one");
+        let offered = selectable_routes(&config, Selectable::Disabled);
+
+        assert_eq!(offered.len(), 1, "one candidate is still a choice to make");
+        assert_eq!(offered[0].1, "only-one");
+    }
+
+    #[test]
+    fn a_picker_offers_only_the_routes_that_would_change() {
+        let config = config_with(&[("on-a", true), ("off-b", false), ("on-c", true)]);
+
+        let to_enable: Vec<String> = selectable_routes(&config, Selectable::Disabled)
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect();
+        assert_eq!(to_enable, vec!["off-b"]);
+
+        let to_disable: Vec<String> = selectable_routes(&config, Selectable::Enabled)
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect();
+        assert_eq!(to_disable, vec!["on-a", "on-c"]);
+
+        assert_eq!(selectable_routes(&config, Selectable::Any).len(), 3);
+    }
+
+    #[test]
+    fn a_disabled_route_says_so_in_the_picker() {
+        let config = config_with(&[("off", false)]);
+        let offered = selectable_routes(&config, Selectable::Any);
+        assert!(offered[0].0.contains("[disabled]"), "{}", offered[0].0);
     }
 
     #[tokio::test]
