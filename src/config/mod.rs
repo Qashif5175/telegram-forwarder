@@ -77,8 +77,13 @@ impl Config {
     ///
     /// This runs before the client connects so that mistakes surface immediately
     /// rather than as a confusing runtime failure.
+    ///
+    /// Route-level checks apply to enabled routes only, matching the cycle
+    /// check: a route that is switched off moves nothing, and refusing to save
+    /// the file because of it would leave no way to park a broken route while
+    /// fixing it. Enabling one runs this again.
     pub fn validate(&self) -> Result<()> {
-        let mut problems = Vec::new();
+        let mut problems = self.defaults.problems();
         let mut seen_ids = HashSet::new();
 
         for route in &self.routes {
@@ -99,6 +104,10 @@ impl Config {
             }
             if route.targets.is_empty() {
                 problems.push(format!("{label} has no targets"));
+            }
+
+            if !route.enabled {
+                continue;
             }
 
             let sources: HashSet<i64> = route.sources.iter().map(|peer| peer.id).collect();
@@ -231,6 +240,51 @@ mod tests {
     }
 
     #[test]
+    fn rejects_dispatch_limits_that_would_deliver_nothing() {
+        // Both of these parse happily and then fail silently at runtime: zero
+        // permits blocks every delivery task forever, and zero attempts skips
+        // the retry loop body entirely.
+        let text = "\
+[defaults.dispatch]
+max_in_flight = 0
+max_attempts = 0
+";
+        let config: Config = toml::from_str(text).unwrap();
+        let err = config.validate().unwrap_err().to_string();
+
+        assert!(err.contains("max_in_flight"), "{err}");
+        assert!(err.contains("max_attempts"), "{err}");
+    }
+
+    #[test]
+    fn rejects_a_snapshot_ttl_that_expires_immediately() {
+        let text = "\
+[defaults.snapshot]
+enabled = true
+ttl = \"0s\"
+";
+        let config: Config = toml::from_str(text).unwrap();
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("snapshot.ttl"), "{err}");
+    }
+
+    #[test]
+    fn a_disabled_snapshot_may_have_any_ttl() {
+        let text = "\
+[defaults.snapshot]
+enabled = false
+ttl = \"0s\"
+";
+        let config: Config = toml::from_str(text).unwrap();
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn the_default_configuration_is_valid() {
+        Config::default().validate().unwrap();
+    }
+
+    #[test]
     fn rejects_a_route_that_targets_its_own_source() {
         let config = Config {
             routes: vec![route("self", &[-1001], &[-1001])],
@@ -238,6 +292,19 @@ mod tests {
         };
         let err = config.validate().unwrap_err().to_string();
         assert!(err.contains("back into itself"), "{err}");
+    }
+
+    #[test]
+    fn a_disabled_route_is_not_held_against_the_file() {
+        // It moves nothing, and refusing to save would leave no way to park a
+        // broken route while fixing it. `route enable` validates again.
+        let mut broken = route("self", &[-1001], &[-1001]);
+        broken.enabled = false;
+        let config = Config {
+            routes: vec![broken],
+            ..Config::default()
+        };
+        config.validate().unwrap();
     }
 
     #[test]

@@ -86,6 +86,46 @@ pub struct Defaults {
     pub dispatch: DispatchPolicy,
 }
 
+impl Defaults {
+    /// Settings that would stop the engine working, in the file's own wording.
+    ///
+    /// These are values a hand-edited file can hold that no amount of runtime
+    /// error handling can recover from, so they are caught before connecting.
+    pub(super) fn problems(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+
+        // The semaphore is created with this many permits; zero of them means
+        // every delivery task waits forever, including at shutdown.
+        if self.dispatch.max_in_flight == 0 {
+            problems.push(
+                "defaults.dispatch.max_in_flight is 0, so no delivery could ever start".to_owned(),
+            );
+        }
+
+        // The retry loop runs `0..max_attempts`, so zero attempts abandons every
+        // message without contacting Telegram at all.
+        if self.dispatch.max_attempts == 0 {
+            problems.push(
+                "defaults.dispatch.max_attempts is 0, so every message would be abandoned \
+                 before it was tried"
+                    .to_owned(),
+            );
+        }
+
+        // Snapshots are swept by age; a zero lifetime deletes them long before
+        // the deletion they exist to survive.
+        if self.snapshot.enabled && self.snapshot.ttl.is_zero() {
+            problems.push(
+                "defaults.snapshot.ttl is 0, so snapshots would be swept before they could \
+                 rescue anything; set defaults.snapshot.enabled = false instead"
+                    .to_owned(),
+            );
+        }
+
+        problems
+    }
+}
+
 /// How a message is reproduced in the target chat.
 ///
 /// The distinction matters because a native forward is a single cheap RPC that
