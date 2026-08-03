@@ -210,7 +210,7 @@ chats you are in and read channels you have merely joined. Two consequences:
 ## Development
 
 ```sh
-cargo test                    # 91 tests, all offline
+cargo test                    # 109 tests, all offline
 cargo clippy --all-targets    # clean, with pedantic lints on
 cargo fmt
 ```

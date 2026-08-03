@@ -59,6 +59,13 @@ questions through the `LoginPrompt` trait so it carries no terminal dependency.
 `DeliveryMode` picks which rungs exist. `Auto` uses all three, which is why it is
 the default. Anything delivered below the top rung is counted as *rescued*.
 
+**The payload shrinks as it descends.** Telegram answers a multi-message send
+with one slot per message and puts `None` in the ones it refused, so a rung can
+place part of an album and refuse the rest. Only the refused parts continue
+downwards: re-sending the whole group would duplicate what already arrived, and
+those duplicates would not be recognised by the `EchoGuard`. Whatever a rung does
+place is remembered by the guard immediately, success or not.
+
 ### Session storage (`session.rs`)
 
 `grammers-session` ships only a memory store and a SQLite one. This project
@@ -69,6 +76,14 @@ enters the dependency graph. **Do not re-enable `sqlite-storage`.**
 Authorization keys are written through immediately; everything else is batched
 behind a dirty flag and flushed by the engine's housekeeping tick.
 
+**`cache_peer` must not block or await anything real.** `Engine::run` polls
+`UpdateStream::next` inside a `tokio::select!`, so that future is dropped
+whenever the housekeeping tick wins the race. It survives that today only
+because the one await inside `process_socket_updates` — `build_peer_map`, which
+calls `cache_peer` — completes without ever yielding. Give `cache_peer` a real
+suspension point and updates that have already advanced the `pts` will start
+disappearing at cancellation, with no gap left for `getDifference` to recover.
+
 ## Traps discovered the hard way
 
 - **`RpcError::name` has the number stripped out.** `FLOOD_WAIT_42` arrives as
@@ -77,13 +92,36 @@ behind a dirty flag and flushed by the engine's housekeeping tick.
 - **`RpcError::is` only understands a leading or trailing `*`.** A middle
   wildcard like `CHAT_SEND_*_FORBIDDEN` degrades into an exact comparison that
   never matches. Use the common prefix.
-- **`forward_messages` can partially succeed**, returning `None` for messages it
-  refused. Treating that as success loses half an album, so it is converted into
-  a failure that degrades to a copy.
+- **`forward_messages` and `send_album` can partially succeed**, returning `None`
+  for the messages they refused. Treating that as success loses half an album;
+  treating it as total failure duplicates the half that arrived. See the delivery
+  ladder above for what is done instead.
+- **`send_album` unwraps `InputMedia::media`.** `copy_media` sets it from
+  `Media::to_raw_input_media`, which is `None` for a link preview — so filtering
+  album members on "has media" rather than "converts to an input media" hands
+  `grammers` a `None` to unwrap and takes the process down.
+- **`Media` being `Some` does not mean there are bytes.** Polls, locations,
+  contacts, dice and link previews are all modelled as media with no file
+  location behind them. Asking to download one creates an empty file before the
+  download reports failure, so `Snapshotter::capture` tests
+  `to_raw_input_location` before queueing anything.
+- **Album members are not buffered in posting order.** Each arrives on its own
+  spawned task and they race for the buffer lock, so the group has to be sorted
+  by message ID before delivery. Telegram numbers the members consecutively.
 - **Config stores Bot API dialog IDs** (`-100…`), but every API call needs a
   `PeerRef` (ID *plus* the access hash bound to this account). The bridge is the
   session peer cache, warmed by `dialogs::fetch_all`. Calling it after login is
   not optional — `grammers` also needs it to resolve update gaps.
+- **The dashboard and the logger both want the terminal.** `ratatui` takes an
+  alternate screen buffer on stdout while `tracing` writes to stderr, and one
+  warning repaints over the frame. `ui::logger::defer`/`resume` hold log output
+  in a bounded buffer for the lifetime of the dashboard and replay it afterwards.
+  Suppressing it instead would hide the flood waits and delivery failures the
+  dashboard exists to show.
+- **Values a hand-edited config can hold that nothing downstream can survive**
+  are rejected by `Config::validate`, not handled at runtime: `max_in_flight = 0`
+  gives the semaphore no permits and hangs every delivery *and* the shutdown that
+  waits for them, and `max_attempts = 0` skips the retry loop body entirely.
 
 ### Where files live
 
@@ -112,7 +150,7 @@ under one root, which is what the tests and multi-account setups use.
 ## Commands
 
 ```sh
-cargo test                    # 91 tests, all offline
+cargo test                    # 109 tests, all offline
 cargo clippy --all-targets    # must be clean; pedantic is on
 cargo fmt
 cargo run -- --help
