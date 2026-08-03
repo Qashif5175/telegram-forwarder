@@ -51,12 +51,7 @@ pub async fn run(paths: &Paths, use_tui: bool, catch_up: bool) -> Result<()> {
 
     // Ctrl+C is the shutdown signal for both presentation modes.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let signal_tx = shutdown_tx.clone();
-    tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            let _ = signal_tx.send(true);
-        }
-    });
+    watch_for_interrupt(shutdown_tx.clone());
 
     let engine_shutdown = {
         let mut rx = shutdown_rx.clone();
@@ -67,12 +62,26 @@ pub async fn run(paths: &Paths, use_tui: bool, catch_up: bool) -> Result<()> {
     };
 
     if use_tui {
-        // The dashboard owns the terminal, so the engine runs beside it.
-        let engine_task = tokio::spawn(engine.run(updates, engine_shutdown));
-        let result = tui::run(stats, shutdown_rx, shutdown_tx).await;
+        // The dashboard owns the terminal, so the engine runs beside it. Each
+        // side signals the shared flag when it stops, so neither can be left
+        // waiting on the other: `tui::run` always sets it on the way out, and
+        // the engine sets it here.
+        let engine_task = {
+            let shutdown_tx = shutdown_tx.clone();
+            tokio::spawn(async move {
+                let result = engine.run(updates, engine_shutdown).await;
+                let _ = shutdown_tx.send(true);
+                result
+            })
+        };
+
+        let tui_result = tui::run(Arc::clone(&stats), shutdown_rx, shutdown_tx).await;
         let engine_result = engine_task.await?;
 
-        result?;
+        // Reported before either result is propagated: the numbers are worth
+        // seeing whether or not the run ended cleanly.
+        report_totals(&stats);
+        tui_result?;
         engine_result?;
     } else {
         engine.run(updates, engine_shutdown).await?;
@@ -81,6 +90,29 @@ pub async fn run(paths: &Paths, use_tui: bool, catch_up: bool) -> Result<()> {
 
     say(Level::Info, "shutting down…");
     connection.shutdown().await
+}
+
+/// Turn Ctrl+C into a shutdown request, and a second one into an exit.
+///
+/// A delivery sitting out a server-issued flood wait can hold the shutdown for
+/// as long as `max_flood_wait` allows — five minutes by default. Waiting is the
+/// right default, because those messages are still going to arrive, but the user
+/// has to be able to change their mind. `tokio` keeps its handler installed for
+/// the life of the process, so without this loop every press after the first is
+/// swallowed and there is no way out short of `kill`.
+fn watch_for_interrupt(shutdown: tokio::sync::watch::Sender<bool>) {
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_err() {
+            return;
+        }
+        let _ = shutdown.send(true);
+
+        if tokio::signal::ctrl_c().await.is_ok() {
+            say(Level::Warn, "interrupted again — leaving without waiting");
+            // Deliberately abrupt: the alternative is ignoring the user.
+            std::process::exit(130);
+        }
+    });
 }
 
 /// Print what is about to happen, so the user can confirm it matches intent.

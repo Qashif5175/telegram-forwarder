@@ -9,7 +9,11 @@
 //! 12:04:31 ✔ delivered to Tech News  route=mirror via=forward took=812ms
 //! ```
 
+use std::collections::VecDeque;
 use std::fmt;
+use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level as TracingLevel, Subscriber};
@@ -46,21 +50,103 @@ pub fn init(verbosity: u8) -> Result<(), Box<dyn std::error::Error + Send + Sync
     };
 
     let subscriber = tracing_subscriber::fmt()
-        .event_format(ConsolaFormat::default())
+        .event_format(ConsolaFormat)
         .with_env_filter(filter)
-        .with_writer(std::io::stderr)
+        .with_writer(Deferrable)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)?;
     Ok(())
 }
 
+/// How many deferred lines to keep before dropping the oldest.
+///
+/// A long run behind the dashboard could otherwise buffer without limit, and the
+/// most recent problems are the ones worth reading afterwards.
+const DEFERRED_CAPACITY: usize = 500;
+
+/// Log lines written while the terminal belongs to something else.
+static DEFERRED: OnceLock<Mutex<VecDeque<Vec<u8>>>> = OnceLock::new();
+
+/// Whether log output must not touch the terminal right now.
+static DEFERRING: AtomicBool = AtomicBool::new(false);
+
+fn deferred() -> &'static Mutex<VecDeque<Vec<u8>>> {
+    DEFERRED.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+/// Hold log output back until [`resume`] is called.
+///
+/// The dashboard runs on an alternate screen buffer on stdout while `tracing`
+/// writes to stderr, and both land on the same terminal: a single warning
+/// repaints over the frame and leaves the display in tatters. Suppressing the
+/// messages instead would hide exactly the flood waits and delivery failures
+/// somebody opens the dashboard to watch, so they are kept and replayed.
+pub fn defer() {
+    DEFERRING.store(true, Ordering::Release);
+}
+
+/// How many lines are currently held back.
+///
+/// Callers announce the replay before it happens, so the lines do not appear
+/// from nowhere after the dashboard closes.
+pub fn pending() -> usize {
+    deferred().lock().map_or(0, |buffered| buffered.len())
+}
+
+/// Resume writing to the terminal, replaying anything captured meanwhile.
+pub fn resume() {
+    DEFERRING.store(false, Ordering::Release);
+
+    let Ok(mut buffered) = deferred().lock() else {
+        return;
+    };
+
+    let mut stderr = io::stderr().lock();
+    for line in buffered.drain(..) {
+        let _ = stderr.write_all(&line);
+    }
+    let _ = stderr.flush();
+}
+
+/// A writer that goes to stderr, or to the deferred buffer while it is held.
+#[derive(Debug, Clone, Copy)]
+struct Deferrable;
+
+impl io::Write for Deferrable {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if !DEFERRING.load(Ordering::Acquire) {
+            return io::stderr().write(buf);
+        }
+
+        if let Ok(mut buffered) = deferred().lock() {
+            buffered.push_back(buf.to_vec());
+            while buffered.len() > DEFERRED_CAPACITY {
+                buffered.pop_front();
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if DEFERRING.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        io::stderr().flush()
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Deferrable {
+    type Writer = Self;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        *self
+    }
+}
+
 /// The event formatter described in the module docs.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct ConsolaFormat {
-    /// Suppresses the leading timestamp, used by the TUI's embedded log pane.
-    pub without_time: bool,
-}
+pub struct ConsolaFormat;
 
 impl<S, N> FormatEvent<S, N> for ConsolaFormat
 where
@@ -83,11 +169,8 @@ where
         let mut visitor = EventVisitor::default();
         event.record(&mut visitor);
 
-        if !self.without_time {
-            let now = chrono::Local::now().format("%H:%M:%S");
-            write!(writer, "{} ", theme::dim(&now.to_string()))?;
-        }
-
+        let now = chrono::Local::now().format("%H:%M:%S");
+        write!(writer, "{} ", theme::dim(&now.to_string()))?;
         write!(writer, "{} ", level.paint(level.glyph()))?;
 
         // An `ok` field marks a success, which reads better in green than in the
@@ -157,5 +240,40 @@ mod tests {
         let quoted = "\"hello world\"";
         visitor.message = quoted.trim_matches('"').to_owned();
         assert_eq!(visitor.message, "hello world");
+    }
+
+    /// `defer` and `resume` drive process-wide state, so the deferral cases live
+    /// in one test rather than racing each other across the test threads.
+    #[test]
+    fn deferred_lines_are_held_bounded_and_replayed() {
+        // The dashboard owns the terminal; a warning written straight to stderr
+        // repaints over it. Nothing may be written, and nothing may be lost.
+        let mut writer = Deferrable;
+
+        defer();
+        writer.write_all(b"first\n").unwrap();
+        writer.write_all(b"second\n").unwrap();
+        assert_eq!(
+            deferred().lock().unwrap().len(),
+            2,
+            "both lines should be held back"
+        );
+        assert_eq!(pending(), 2, "both lines should be replayed");
+        resume();
+        assert!(
+            deferred().lock().unwrap().is_empty(),
+            "replaying should drain the buffer"
+        );
+
+        // A dashboard left open for a week must not accumulate without limit.
+        defer();
+        for index in 0..(DEFERRED_CAPACITY + 25) {
+            writer
+                .write_all(format!("line {index}\n").as_bytes())
+                .unwrap();
+        }
+        let held = pending();
+        resume();
+        assert_eq!(held, DEFERRED_CAPACITY, "the buffer should stay bounded");
     }
 }

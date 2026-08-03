@@ -18,19 +18,59 @@ use ratatui::{DefaultTerminal, Frame};
 use tokio::sync::watch;
 
 use crate::engine::stats::{Outcome, Snapshot, Stats};
+use crate::ui::{logger, theme};
 
 /// How often the dashboard repaints.
 const FRAME_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Run the dashboard until the user quits or `shutdown` fires.
+///
+/// Whatever happens — a clean quit, a terminal error, a panic unwinding through
+/// here — the terminal is restored, the deferred log is replayed, and the engine
+/// is told to stop. Leaving any of those undone strands the process with no
+/// display and no way to see why.
 pub async fn run(
     stats: Arc<Stats>,
     mut shutdown: watch::Receiver<bool>,
     shutdown_tx: watch::Sender<bool>,
 ) -> Result<()> {
-    let mut terminal = ratatui::init();
+    // `try_init` rather than `init`: the latter panics, and "there is no terminal
+    // to draw on" is an ordinary thing to tell someone who piped the output.
+    let terminal = ratatui::try_init();
+
+    // `ratatui` takes an alternate screen buffer on stdout; anything written to
+    // stderr from here on would land on top of the dashboard.
+    let mut terminal = match terminal {
+        Ok(terminal) => {
+            logger::defer();
+            terminal
+        }
+        Err(error) => {
+            let _ = shutdown_tx.send(true);
+            return Err(color_eyre::eyre::eyre!(
+                "could not start the dashboard: {error}. Run without --tui to use plain logs"
+            ));
+        }
+    };
+
     let result = event_loop(&mut terminal, &stats, &mut shutdown, &shutdown_tx).await;
+
     ratatui::restore();
+    let held = logger::pending();
+    if held > 0 {
+        eprintln!(
+            "{}",
+            theme::dim(&format!(
+                "— {held} log line(s) held back while the dashboard was open —"
+            ))
+        );
+    }
+    logger::resume();
+
+    // The engine is waiting on this flag. Without it, an error here would leave
+    // the process alive with nothing on screen and nothing to interrupt.
+    let _ = shutdown_tx.send(true);
+
     result
 }
 
