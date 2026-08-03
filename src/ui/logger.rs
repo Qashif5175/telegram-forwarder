@@ -169,18 +169,20 @@ where
         let mut visitor = EventVisitor::default();
         event.record(&mut visitor);
 
-        let now = chrono::Local::now().format("%H:%M:%S");
-        write!(writer, "{} ", theme::dim(&now.to_string()))?;
-        write!(writer, "{} ", level.paint(level.glyph()))?;
-
-        // An `ok` field marks a success, which reads better in green than in the
-        // neutral info colour.
-        let message_style = if visitor.success && level == Level::Info {
+        // An `ok` field marks a success, which reads better as a green tick than
+        // as the neutral info marker. The glyph follows the message: a line that
+        // says something worked should not open with the same symbol as one
+        // reporting that a chat list is being refreshed.
+        let style = if visitor.success && level == Level::Info {
             Level::Success
         } else {
             level
         };
-        write!(writer, "{}", message_style.paint(&visitor.message))?;
+
+        let now = chrono::Local::now().format("%H:%M:%S");
+        write!(writer, "{} ", theme::dim(&now.to_string()))?;
+        write!(writer, "{} ", style.paint(style.glyph()))?;
+        write!(writer, "{}", style.paint(&visitor.message))?;
 
         if !visitor.fields.is_empty() {
             write!(writer, "  {}", theme::dim(&visitor.fields.join(" ")))?;
@@ -233,13 +235,75 @@ impl Visit for EventVisitor {
 mod tests {
     use super::*;
 
+    /// Render events through the real formatter and return what was written.
+    fn render(emit: impl FnOnce()) -> String {
+        #[derive(Clone)]
+        struct Buffer(std::sync::Arc<Mutex<Vec<u8>>>);
+
+        impl io::Write for Buffer {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.0.lock().expect("buffer").extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Buffer {
+            type Writer = Self;
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        let sink = Buffer(std::sync::Arc::new(Mutex::new(Vec::new())));
+        let subscriber = tracing_subscriber::fmt()
+            .event_format(ConsolaFormat)
+            .with_writer(sink.clone())
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, emit);
+        let written = sink.0.lock().expect("buffer").clone();
+        String::from_utf8(written).expect("utf-8")
+    }
+
     #[test]
-    fn message_field_becomes_the_message() {
-        let mut visitor = EventVisitor::default();
-        // `record_debug` is what `tracing` uses for `info!("text")`.
-        let quoted = "\"hello world\"";
-        visitor.message = quoted.trim_matches('"').to_owned();
-        assert_eq!(visitor.message, "hello world");
+    fn the_message_leads_and_the_rest_trails_as_fields() {
+        let line = render(|| tracing::info!(route = "mirror", "refreshing chat list"));
+
+        assert!(line.contains("refreshing chat list"), "{line}");
+        assert!(line.contains("route=mirror"), "{line}");
+        assert!(
+            line.find("refreshing").unwrap() < line.find("route=").unwrap(),
+            "the message should come before its fields: {line}"
+        );
+    }
+
+    #[test]
+    fn a_success_is_marked_differently_from_ordinary_news() {
+        // The whole point of the `ok` marker: at a glance, "it worked" must not
+        // look like "here is some information".
+        let success =
+            render(|| tracing::info!(ok = true, via = "forward", "delivered to Tech News"));
+        let plain = render(|| tracing::info!("refreshing chat list"));
+
+        assert!(success.contains(Level::Success.glyph()), "{success}");
+        assert!(plain.contains(Level::Info.glyph()), "{plain}");
+        assert!(
+            !success.contains("ok=true"),
+            "the marker drives the styling, it is not itself news: {success}"
+        );
+        assert!(success.contains("via=forward"), "{success}");
+    }
+
+    #[test]
+    fn a_quoted_debug_message_loses_its_quotes() {
+        // `tracing` records a bare string literal through `record_debug`, which
+        // renders it with the quotes still attached.
+        let line = render(|| tracing::warn!("could not persist the session"));
+        assert!(line.contains("could not persist the session"), "{line}");
+        assert!(!line.contains('"'), "{line}");
     }
 
     /// `defer` and `resume` drive process-wide state, so the deferral cases live
@@ -273,7 +337,13 @@ mod tests {
                 .unwrap();
         }
         let held = pending();
+
+        // Drained rather than replayed: `resume` writes to the real stderr, and
+        // five hundred lines of it would drown the test output.
+        deferred().lock().unwrap().clear();
         resume();
+
         assert_eq!(held, DEFERRED_CAPACITY, "the buffer should stay bounded");
+        assert!(!DEFERRING.load(Ordering::Acquire), "deferral should be off");
     }
 }

@@ -220,19 +220,37 @@ impl Dispatcher {
             match self.attempt(&payload, target, target_ref, strategy).await {
                 Outcome::Delivered => {
                     let rescued = index > 0 || recovered_parts;
+                    let took = latency_from.captured_at.elapsed();
                     self.stats.delivered(
                         route,
                         strategy,
-                        latency_from.captured_at.elapsed(),
+                        took,
                         rescued,
                         format!("{} ← {describe}", target.label),
                     );
 
+                    // Every delivery is announced, not just the interesting ones.
+                    // Without this the default presentation says nothing at all
+                    // while it is working, which reads exactly like a tool that
+                    // is silently broken.
+                    let took = format!("{}ms", took.as_millis());
                     if rescued {
                         tracing::info!(
-                            target_chat = %target.label,
+                            ok = true,
+                            route = %route,
                             via = strategy.label(),
-                            "rescued a message the source had already deleted"
+                            %took,
+                            "rescued into {} — the source was already gone",
+                            target.label
+                        );
+                    } else {
+                        tracing::info!(
+                            ok = true,
+                            route = %route,
+                            via = strategy.label(),
+                            %took,
+                            "delivered to {}",
+                            target.label
                         );
                     }
 
