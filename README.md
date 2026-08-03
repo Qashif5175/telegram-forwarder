@@ -310,6 +310,7 @@ max_bytes = 52428800              # skip files larger than this; 0 disables the 
 ttl = "1h"                        # how long snapshots stay on disk
 
 [defaults.dispatch]
+album_window = "400ms"            # how long to wait for an album's other parts
 per_target_interval = "300ms"     # minimum gap per destination chat
 max_attempts = 5                  # per delivery strategy
 max_flood_wait = "5m"             # refuse server-requested waits longer than this
@@ -338,6 +339,20 @@ form Telegram Desktop shows; titles are labels only, refreshed by
 Pacing is enforced **per target chat**, so fanning out to ten channels runs at
 full speed while one busy channel is throttled on its own. An album counts once,
 not once per photo.
+
+### Tuning `album_window`
+
+Telegram sends the members of an album as separate updates and never signals
+that the last one has gone, so the only way to know a group is complete is that
+it stopped growing. This is how long to give it.
+
+Waiting costs latency and never content — every part is captured before the timer
+starts, so a source deleted during the window is still delivered. Set it longer
+if you ever see one post arrive as two (a straggler that missed the window forms
+a group of its own); there is no reason to set it shorter.
+
+`0` turns grouping off, forwarding each member as its own message. It is the one
+value here that changes *what* the target receives rather than *when*.
 
 ### Tuning `per_target_interval`
 

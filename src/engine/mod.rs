@@ -39,14 +39,6 @@ use self::router::{EchoGuard, Router};
 use self::snapshot::{Snapshot, Snapshotter};
 use self::stats::Stats;
 
-/// How long to wait for the remaining parts of an album to arrive.
-///
-/// Telegram delivers the members of a grouped post as separate updates within a
-/// few hundred milliseconds. Waiting is safe because every part has already been
-/// captured by the time the timer starts: the delay costs latency, never
-/// content.
-const ALBUM_WINDOW: Duration = Duration::from_millis(400);
-
 /// How often to persist the session and sweep the media cache.
 const HOUSEKEEPING_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -59,6 +51,8 @@ pub struct Engine {
     stats: Arc<Stats>,
     echo: Arc<EchoGuard>,
     permits: Arc<Semaphore>,
+    /// How long to hold a grouped post open for its remaining parts.
+    album_window: Duration,
     /// In-progress albums.
     ///
     /// Keyed by chat as well as by Telegram's grouped ID: the group ID is only
@@ -105,6 +99,7 @@ impl Engine {
             snapshotter: Snapshotter::new(client, cache_dir, config.defaults.snapshot.clone()),
             router,
             permits: Arc::new(Semaphore::new(config.defaults.dispatch.max_in_flight)),
+            album_window: config.defaults.dispatch.album_window,
             session,
             dispatcher,
             stats,
@@ -245,7 +240,12 @@ impl Engine {
             "captured"
         );
 
-        if let Some(group) = snapshot.grouped_id {
+        // A zero window switches grouping off outright rather than racing a
+        // timer that expires immediately, which would batch whichever members
+        // happened to share a scheduler tick.
+        if let Some(group) = snapshot.grouped_id
+            && !self.album_window.is_zero()
+        {
             self.buffer_album((chat_id, group), snapshot, tasks);
         } else {
             let context = self.context();
@@ -257,6 +257,7 @@ impl Engine {
     fn buffer_album(&self, key: AlbumKey, snapshot: Arc<Snapshot>, tasks: &mut JoinSet<()>) {
         let albums = Arc::clone(&self.albums);
         let context = self.context();
+        let window = self.album_window;
 
         tasks.spawn(async move {
             let is_first = {
@@ -272,7 +273,7 @@ impl Engine {
                 return;
             }
 
-            tokio::time::sleep(ALBUM_WINDOW).await;
+            tokio::time::sleep(window).await;
             let mut members = albums.lock().await.remove(&key).unwrap_or_default();
             if members.is_empty() {
                 return;

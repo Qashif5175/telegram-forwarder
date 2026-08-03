@@ -211,10 +211,27 @@ impl Default for SnapshotPolicy {
     }
 }
 
-/// Pacing, retry and concurrency behaviour.
+/// Grouping, pacing, retry and concurrency behaviour.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DispatchPolicy {
+    /// How long to wait for the remaining parts of an album to arrive.
+    ///
+    /// Telegram delivers the members of a grouped post as separate updates and
+    /// never signals that the last one has been sent, so the only way to know a
+    /// group is complete is that it stopped growing. This is how long to give it.
+    ///
+    /// Waiting costs latency and never content: every part is captured before
+    /// the timer starts, so a source deleted during the window is still
+    /// delivered. Too short and a straggler forms a second group that arrives as
+    /// its own message; too long and every album is held up for nothing.
+    ///
+    /// Zero switches grouping off — each member is then forwarded on its own,
+    /// which is the one setting that changes what the target sees rather than
+    /// when it sees it.
+    #[serde(default = "default_album_window", with = "humantime_serde")]
+    pub album_window: Duration,
+
     /// Minimum gap between two deliveries to the *same* target chat.
     ///
     /// Telegram rate-limits per destination, so this is enforced per target
@@ -257,6 +274,7 @@ pub struct DispatchPolicy {
 impl Default for DispatchPolicy {
     fn default() -> Self {
         Self {
+            album_window: default_album_window(),
             per_target_interval: default_per_target_interval(),
             max_attempts: default_max_attempts(),
             max_flood_wait: default_max_flood_wait(),
@@ -448,6 +466,12 @@ const fn default_snapshot_max_bytes() -> u64 {
 
 const fn default_snapshot_ttl() -> Duration {
     Duration::from_secs(60 * 60)
+}
+
+/// Long enough for the parts of an album to land together in practice, short
+/// enough not to be noticed. Tuned by observation, like the pacing interval.
+const fn default_album_window() -> Duration {
+    Duration::from_millis(400)
 }
 
 const fn default_per_target_interval() -> Duration {

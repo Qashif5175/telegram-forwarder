@@ -269,6 +269,27 @@ ttl = \"0s\"
     }
 
     #[test]
+    fn the_album_window_is_tunable_and_defaults_to_something_short() {
+        // Every other timing knob is configurable; this one used to be a
+        // constant, which meant a source whose album parts arrive slowly had no
+        // remedy short of a rebuild.
+        let text = "\
+[defaults.dispatch]
+album_window = \"1s\"
+";
+        let config: Config = toml::from_str(text).unwrap();
+        assert_eq!(
+            config.defaults.dispatch.album_window,
+            std::time::Duration::from_secs(1)
+        );
+        config.validate().unwrap();
+
+        let fallback = Config::default().defaults.dispatch.album_window;
+        assert!(!fallback.is_zero(), "grouping is on unless asked otherwise");
+        assert!(fallback < std::time::Duration::from_secs(2), "{fallback:?}");
+    }
+
+    #[test]
     fn a_disabled_snapshot_may_have_any_ttl() {
         let text = "\
 [defaults.snapshot]
