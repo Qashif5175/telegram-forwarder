@@ -199,7 +199,7 @@ impl Dispatcher {
     pub async fn deliver(
         &self,
         route: &str,
-        mut payload: Payload,
+        payload: Payload,
         target: &Target,
         target_ref: PeerRef,
         mode: DeliveryMode,
@@ -209,52 +209,146 @@ impl Dispatcher {
         let describe = payload.primary().describe();
         let latency_from = Arc::clone(payload.primary());
         let total = payload.snapshots.len();
+        let source = payload.source;
 
-        let ladder = Self::ladder(mode);
+        let mut walk = self.walk_ladder(&payload, target, target_ref, mode).await;
+
+        // A group Telegram will not take as a group can still be delivered as
+        // its parts. Albums have to be homogeneous — a post mixing a photo with,
+        // say, an SVG is one no rung can ever send as a single unit, and the
+        // client that produced it warns about exactly this. Sending the members
+        // one at a time gives up the grouping and nothing else, which beats
+        // giving up the post.
+        walk = match walk {
+            Walk::Incomplete { remaining, reason } if remaining.len() > 1 => {
+                tracing::warn!(
+                    chat = %target.label,
+                    parts = remaining.len(),
+                    why = %reason,
+                    "the group was refused as a group; delivering its parts separately"
+                );
+                self.deliver_separately(remaining, source, target, target_ref, mode)
+                    .await
+            }
+            settled => settled,
+        };
+
+        let (strategy, rescued) = match walk {
+            Walk::Delivered { strategy, rescued } => (strategy, rescued),
+            Walk::Incomplete { remaining, reason } => {
+                return Err(self.report_failure(route, target, total, remaining.len(), &reason));
+            }
+        };
+
+        let took = latency_from.captured_at.elapsed();
+        self.stats.delivered(
+            route,
+            strategy,
+            took,
+            rescued,
+            format!("{} ← {describe}", target.label),
+        );
+
+        // Every delivery is announced, not just the interesting ones. Without
+        // this the default presentation says nothing at all while it is working,
+        // which reads exactly like a tool that is silently broken.
+        let took = format!("{}ms", took.as_millis());
+        if rescued {
+            tracing::info!(
+                ok = true,
+                route = %route,
+                via = strategy.label(),
+                %took,
+                "rescued into {} — the source was already gone",
+                target.label
+            );
+        } else {
+            tracing::info!(
+                ok = true,
+                route = %route,
+                via = strategy.label(),
+                %took,
+                "delivered to {}",
+                target.label
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Send each snapshot as a message of its own.
+    ///
+    /// Used only once the group has already been refused as a group. Anything
+    /// that arrives here owes its delivery to the fallback, so it counts as a
+    /// rescue even if the individual sends take the top rung.
+    async fn deliver_separately(
+        &self,
+        parts: Vec<Arc<Snapshot>>,
+        source: PeerRef,
+        target: &Target,
+        target_ref: PeerRef,
+        mode: DeliveryMode,
+    ) -> Walk {
+        let mut carried_by = None;
+        let mut missing = Vec::new();
+        let mut reason = "no part of the group could be delivered".to_owned();
+
+        for snapshot in parts {
+            let single = Payload {
+                snapshots: vec![Arc::clone(&snapshot)],
+                source,
+            };
+
+            match self.walk_ladder(&single, target, target_ref, mode).await {
+                Walk::Delivered { strategy, .. } => carried_by = carried_by.or(Some(strategy)),
+                Walk::Incomplete { reason: why, .. } => {
+                    reason = why;
+                    missing.push(snapshot);
+                }
+            }
+        }
+
+        match carried_by {
+            Some(strategy) if missing.is_empty() => Walk::Delivered {
+                strategy,
+                rescued: true,
+            },
+            _ => Walk::Incomplete {
+                remaining: missing,
+                reason,
+            },
+        }
+    }
+
+    /// Walk the strategy ladder for one payload.
+    ///
+    /// The payload shrinks as it descends: when a rung places part of a group
+    /// and refuses the rest, only the remainder continues downwards.
+    async fn walk_ladder(
+        &self,
+        payload: &Payload,
+        target: &Target,
+        target_ref: PeerRef,
+        mode: DeliveryMode,
+    ) -> Walk {
+        let total = payload.snapshots.len();
+        let mut payload = Payload {
+            snapshots: payload.snapshots.clone(),
+            source: payload.source,
+        };
+
         let mut last_error: Option<String> = None;
         // A part that landed on an earlier rung already owes its survival to the
         // snapshot, so finishing the job still counts as a rescue.
         let mut recovered_parts = false;
 
-        for (index, strategy) in ladder.iter().copied().enumerate() {
+        for (index, strategy) in Self::ladder(mode).iter().copied().enumerate() {
             match self.attempt(&payload, target, target_ref, strategy).await {
                 Outcome::Delivered => {
-                    let rescued = index > 0 || recovered_parts;
-                    let took = latency_from.captured_at.elapsed();
-                    self.stats.delivered(
-                        route,
+                    return Walk::Delivered {
                         strategy,
-                        took,
-                        rescued,
-                        format!("{} ← {describe}", target.label),
-                    );
-
-                    // Every delivery is announced, not just the interesting ones.
-                    // Without this the default presentation says nothing at all
-                    // while it is working, which reads exactly like a tool that
-                    // is silently broken.
-                    let took = format!("{}ms", took.as_millis());
-                    if rescued {
-                        tracing::info!(
-                            ok = true,
-                            route = %route,
-                            via = strategy.label(),
-                            %took,
-                            "rescued into {} — the source was already gone",
-                            target.label
-                        );
-                    } else {
-                        tracing::info!(
-                            ok = true,
-                            route = %route,
-                            via = strategy.label(),
-                            %took,
-                            "delivered to {}",
-                            target.label
-                        );
-                    }
-
-                    return Ok(());
+                        rescued: index > 0 || recovered_parts,
+                    };
                 }
 
                 Outcome::Partial(remaining) => {
@@ -263,7 +357,7 @@ impl Dispatcher {
                         via = strategy.label(),
                         placed = total - remaining.len(),
                         missing = remaining.len(),
-                        "part of an album was refused; sending only the rest"
+                        "part of a group was refused; sending only the rest"
                     );
                     last_error = Some(format!("{} part(s) were refused", remaining.len()));
                     payload.snapshots = remaining;
@@ -281,13 +375,18 @@ impl Dispatcher {
                 }
 
                 Outcome::Failed(message) => {
-                    return Err(self.report_failure(route, target, total, &payload, &message));
+                    return Walk::Incomplete {
+                        remaining: payload.snapshots,
+                        reason: message,
+                    };
                 }
             }
         }
 
-        let reason = last_error.unwrap_or_else(|| "every delivery strategy failed".to_owned());
-        Err(self.report_failure(route, target, total, &payload, &reason))
+        Walk::Incomplete {
+            remaining: payload.snapshots,
+            reason: last_error.unwrap_or_else(|| "every delivery strategy failed".to_owned()),
+        }
     }
 
     /// Record a failed delivery and build the error the caller logs.
@@ -299,10 +398,9 @@ impl Dispatcher {
         route: &str,
         target: &Target,
         total: usize,
-        remaining: &Payload,
+        missing: usize,
         reason: &str,
     ) -> color_eyre::eyre::Report {
-        let missing = remaining.snapshots.len();
         let detail = if missing < total {
             format!(
                 "{}: {} of {total} part(s) delivered, {missing} could not be: {reason}",
@@ -628,6 +726,18 @@ fn build_album_item(snap: &Snapshot, uploaded: Uploaded) -> InputMedia {
     item
 }
 
+/// How far a walk down the ladder got.
+#[derive(Debug)]
+enum Walk {
+    /// Everything arrived, carried by this rung.
+    Delivered { strategy: Strategy, rescued: bool },
+    /// These parts did not arrive, for this reason.
+    Incomplete {
+        remaining: Vec<Arc<Snapshot>>,
+        reason: String,
+    },
+}
+
 /// Result of running one strategy to completion.
 #[derive(Debug)]
 enum Outcome {
@@ -690,6 +800,37 @@ mod tests {
 
         assert!(sent.delivered.is_empty());
         assert_eq!(sent.refused.len(), 3);
+    }
+
+    #[test]
+    fn a_group_that_cannot_travel_as_a_group_falls_back_to_its_parts() {
+        // Telegram albums have to be homogeneous, so a post mixing a photo with
+        // a document is one that no rung can ever send as a single unit. The
+        // members are still perfectly sendable one at a time, and the fallback
+        // is only worth running when there is more than one of them.
+        let refused: Vec<Arc<Snapshot>> = (1..=3)
+            .map(|id| Arc::new(Snapshot::for_test(id, "")))
+            .collect();
+
+        let group = Walk::Incomplete {
+            remaining: refused,
+            reason: "the request was rejected".to_owned(),
+        };
+        assert!(
+            matches!(&group, Walk::Incomplete { remaining, .. } if remaining.len() > 1),
+            "a multi-part refusal is what triggers delivering the parts separately"
+        );
+
+        // A lone message has no parts to fall back to; retrying it one at a time
+        // would just repeat the send that already failed.
+        let single = Walk::Incomplete {
+            remaining: vec![Arc::new(Snapshot::for_test(1, ""))],
+            reason: "the request was rejected".to_owned(),
+        };
+        assert!(
+            !matches!(&single, Walk::Incomplete { remaining, .. } if remaining.len() > 1),
+            "a single refused message must not be retried as a group of one"
+        );
     }
 
     #[test]
