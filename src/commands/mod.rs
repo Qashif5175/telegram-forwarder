@@ -178,15 +178,7 @@ pub fn status(paths: &Paths) -> Result<()> {
         theme::dim("session"),
         paths.session_file().display()
     );
-    eprintln!(
-        "  {}   {}",
-        theme::dim("account"),
-        if paths.session_file().exists() {
-            theme::accent("signed in")
-        } else {
-            "not signed in — run `tgfwd login`".to_owned()
-        }
-    );
+    eprintln!("  {}   {}", theme::dim("account"), describe_account(paths));
     eprintln!();
 
     if config.routes.is_empty() {
@@ -200,6 +192,23 @@ pub fn status(paths: &Paths) -> Result<()> {
     route::print_routes(&config);
     eprintln!("  {}", theme::dim("edit the file with `tgfwd config edit`"));
     Ok(())
+}
+
+/// Describe the stored session without connecting.
+///
+/// The session file exists as soon as anything at all is persisted, so its
+/// presence is not evidence that a login ever succeeded; the authorization key
+/// inside it is.
+fn describe_account(paths: &Paths) -> String {
+    if !paths.session_file().exists() {
+        return "not signed in — run `tgfwd login`".to_owned();
+    }
+
+    match FileSession::load(paths.session_file()).and_then(|session| session.has_authorization()) {
+        Ok(true) => theme::accent("signed in"),
+        Ok(false) => "session is not authorized — run `tgfwd login`".to_owned(),
+        Err(error) => format!("session could not be read: {error}"),
+    }
 }
 
 /// `tgfwd doctor`

@@ -160,8 +160,6 @@ impl FileSession {
         })
     }
 
-    /// Whether an account is signed in on this session.
-    ///
     /// Persist the session if anything changed since the last write.
     ///
     /// Returns whether a write actually happened, which lets callers avoid
@@ -204,12 +202,10 @@ impl FileSession {
         // Write to a sibling and rename, so an interrupted write cannot destroy a
         // working session.
         let tmp = self.path.with_extension("json.tmp");
-        fs_err::write(&tmp, &json).map_err(|source| SessionError::Io {
+        write_private(&tmp, &json).map_err(|source| SessionError::Io {
             path: tmp.clone(),
             source,
         })?;
-
-        restrict_permissions(&tmp)?;
 
         fs_err::rename(&tmp, &self.path).map_err(|source| SessionError::Io {
             path: self.path.clone(),
@@ -229,25 +225,37 @@ impl FileSession {
     }
 }
 
-/// Tighten the session file to owner-only access.
+/// Write `bytes` to a file only its owner can read.
 ///
-/// The file contains the authorization key: anyone who can read it is logged
-/// into the account. On platforms without Unix permissions this is a no-op.
+/// The contents are an authorization key: whoever reads it is logged into the
+/// account. The permissions are set *as the file is created* rather than
+/// afterwards, because a create-then-chmod leaves a window in which the key sits
+/// on disk at whatever the umask allows. On platforms without Unix permissions
+/// this is an ordinary write.
 #[cfg(unix)]
-fn restrict_permissions(path: &Path) -> Result<(), SessionError> {
-    use std::os::unix::fs::PermissionsExt;
+fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    // `fs_err` does not surface the Unix-only `mode`, and the whole point here is
+    // to create the file with it already applied. The caller attaches the path to
+    // any error, so nothing is lost by dropping to `std`.
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
 
-    fs_err::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|source| {
-        SessionError::Io {
-            path: path.to_path_buf(),
-            source,
-        }
-    })
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+
+    file.write_all(bytes)?;
+    // The rename that follows is atomic, but only with respect to content that
+    // actually reached the disk.
+    file.sync_all()
 }
 
 #[cfg(not(unix))]
-fn restrict_permissions(_path: &Path) -> Result<(), SessionError> {
-    Ok(())
+fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    fs_err::write(path, bytes)
 }
 
 impl Session for FileSession {
@@ -343,6 +351,19 @@ impl FileSession {
         let data = self.data.read().map_err(|_| SessionError::Poisoned)?;
         Ok(data.peer_infos.len())
     }
+
+    /// Whether an account is actually signed in on this session.
+    ///
+    /// The file existing is not the same thing: one is created as soon as any
+    /// state is persisted, so reporting "signed in" from its presence alone
+    /// tells the user the opposite of the truth after a failed login.
+    pub fn has_authorization(&self) -> Result<bool, SessionError> {
+        let data = self.data.read().map_err(|_| SessionError::Poisoned)?;
+        Ok(data
+            .dc_options
+            .values()
+            .any(|option| option.auth_key.is_some()))
+    }
 }
 
 #[cfg(test)]
@@ -436,5 +457,34 @@ mod tests {
 
         let mode = fs_err::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o077, 0, "session file must be owner-only");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_private_file_is_never_briefly_readable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Creating the file and then tightening it would leave the key on disk
+        // at the umask's discretion for as long as the write takes.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret");
+        write_private(&path, b"key").unwrap();
+
+        let mode = fs_err::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "{mode:o} exposes the file to other users");
+    }
+
+    #[tokio::test]
+    async fn an_unauthorized_session_is_not_reported_as_signed_in() {
+        // The file exists as soon as anything is persisted, so its presence says
+        // nothing about whether a login ever succeeded.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let session = FileSession::load(&path).unwrap();
+        session.set_home_dc_id(2).await.unwrap();
+        session.flush().unwrap();
+
+        assert!(path.exists(), "the file is written all the same");
+        assert!(!session.has_authorization().unwrap());
     }
 }
