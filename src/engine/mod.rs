@@ -203,28 +203,47 @@ impl Engine {
     }
 
     /// Route a single update.
+    ///
+    /// Every way out of here that is not a delivery says so. A message that is
+    /// dropped on the floor without a word is indistinguishable from one that
+    /// never arrived, and those two have completely different causes.
     fn handle(&self, update: Update, tasks: &mut JoinSet<()>) {
         let Update::NewMessage(message) = update else {
             return;
         };
 
         let Some(chat_id) = message.peer_id().bot_api_dialog_id() else {
+            tracing::debug!("a message arrived from a peer with no dialog id");
             return;
         };
 
         // Never re-process a message this tool produced, or a chain of routes
         // would multiply it without end.
         if self.echo.is_own(chat_id, message.id()) {
+            tracing::debug!(
+                chat = chat_id,
+                id = message.id(),
+                "ignoring a message this tool produced"
+            );
             return;
         }
 
         if !self.router.watches(chat_id) {
+            tracing::trace!(chat = chat_id, id = message.id(), "chat is not watched");
             return;
         }
 
         // Capture first, decide later: everything after this point survives the
         // source being deleted.
         let snapshot = self.snapshotter.capture(chat_id, &message);
+
+        tracing::debug!(
+            chat = chat_id,
+            id = snapshot.message_id,
+            group = ?snapshot.grouped_id,
+            kind = %snapshot.kind,
+            "captured"
+        );
 
         if let Some(group) = snapshot.grouped_id {
             self.buffer_album((chat_id, group), snapshot, tasks);
