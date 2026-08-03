@@ -6,7 +6,7 @@ rust-version = "1.90"
 description = "Many-to-many Telegram channel forwarder built for messages that get deleted seconds after they are posted"
 authors = ["telegram-forwarder contributors"]
 license = "MIT"
-repository = "https://github.com/your-name/telegram-forwarder"
+repository = "https://github.com/awdr74100/telegram-forwarder"
 keywords = ["telegram", "mtproto", "forwarder", "cli"]
 categories = ["command-line-utilities"]
 
