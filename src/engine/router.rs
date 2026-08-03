@@ -3,7 +3,7 @@
 //! Lookup happens on every single update in every watched chat, so it is a hash
 //! lookup against a table built once at startup rather than a scan over routes.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
 
 use crate::config::{Config, DeliveryMode, Filter, PeerLink};
@@ -92,6 +92,19 @@ impl Router {
     /// Number of source chats in the table.
     pub fn source_count(&self) -> usize {
         self.table.len()
+    }
+
+    /// Every route that survived into the table, once each.
+    ///
+    /// Not the same as the enabled routes in the config: one whose every target
+    /// is also its own source is dropped above, and listing it in the dashboard
+    /// would show a row that can never move.
+    pub fn routes(&self) -> BTreeSet<&str> {
+        self.table
+            .values()
+            .flatten()
+            .map(|binding| binding.route.as_str())
+            .collect()
     }
 }
 
@@ -245,6 +258,28 @@ mod tests {
     fn a_route_whose_only_target_is_its_source_disappears() {
         let router = Router::build(&config_with(vec![route("self", &[-1001], &[-1001])]));
         assert!(router.bindings_for(-1001).is_empty());
+    }
+
+    #[test]
+    fn only_routes_that_can_move_something_are_listed() {
+        // The dashboard registers these, and a row that can never move is worse
+        // than no row: it reads as a route that is silently failing.
+        let router = Router::build(&config_with(vec![
+            route("live", &[-1001], &[-2001]),
+            route("self", &[-3001], &[-3001]),
+        ]));
+
+        assert_eq!(router.routes(), BTreeSet::from(["live"]));
+    }
+
+    #[test]
+    fn a_route_watching_several_chats_is_listed_once() {
+        let router = Router::build(&config_with(vec![route(
+            "mirror",
+            &[-1001, -1002],
+            &[-2001],
+        )]));
+        assert_eq!(router.routes().len(), 1);
     }
 
     #[test]

@@ -59,9 +59,16 @@ pub struct Engine {
     stats: Arc<Stats>,
     echo: Arc<EchoGuard>,
     permits: Arc<Semaphore>,
-    /// In-progress albums, keyed by Telegram's grouped ID.
-    albums: Arc<Mutex<HashMap<i64, Vec<Arc<Snapshot>>>>>,
+    /// In-progress albums.
+    ///
+    /// Keyed by chat as well as by Telegram's grouped ID: the group ID is only
+    /// meaningful within a chat, and merging two chats' albums would deliver
+    /// each of them to the other's targets.
+    albums: Arc<Mutex<HashMap<AlbumKey, Vec<Arc<Snapshot>>>>>,
 }
+
+/// A chat and the grouped ID of one album within it.
+type AlbumKey = (i64, i64);
 
 impl std::fmt::Debug for Engine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -79,9 +86,11 @@ impl Engine {
         config: &Config,
         cache_dir: std::path::PathBuf,
     ) -> Self {
+        let router = Arc::new(Router::build(config));
+
         let stats = Arc::new(Stats::new());
-        for route in config.active_routes() {
-            stats.register_route(&route.id);
+        for route in router.routes() {
+            stats.register_route(route);
         }
 
         let echo = Arc::new(EchoGuard::default());
@@ -94,7 +103,7 @@ impl Engine {
 
         Self {
             snapshotter: Snapshotter::new(client, cache_dir, config.defaults.snapshot.clone()),
-            router: Arc::new(Router::build(config)),
+            router,
             permits: Arc::new(Semaphore::new(config.defaults.dispatch.max_in_flight)),
             session,
             dispatcher,
@@ -126,17 +135,30 @@ impl Engine {
 
         let mut tasks = JoinSet::new();
         tokio::pin!(shutdown);
+        let mut stream_failure = None;
 
         loop {
             // Reap finished delivery tasks so the set does not grow unbounded.
-            while tasks.try_join_next().is_some() {}
+            // A panicking task would otherwise vanish without a trace.
+            while let Some(finished) = tasks.try_join_next() {
+                if let Err(error) = finished
+                    && !error.is_cancelled()
+                {
+                    tracing::error!(%error, "a delivery task panicked");
+                }
+            }
 
             tokio::select! {
                 () = &mut shutdown => break,
 
                 _ = housekeeping.tick() => {
-                    if let Ok(true) = self.session.flush() {
-                        tracing::debug!("session persisted");
+                    match self.session.flush() {
+                        Ok(true) => tracing::debug!("session persisted"),
+                        Ok(false) => {}
+                        // Worth saying out loud: a session that cannot be written
+                        // means the next start has to log in again, and logging in
+                        // is the most flood-limited thing this tool does.
+                        Err(error) => tracing::warn!(%error, "could not persist the session"),
                     }
                     self.snapshotter.sweep();
                 }
@@ -146,6 +168,7 @@ impl Engine {
                         Ok(update) => self.handle(update, &mut tasks),
                         Err(error) => {
                             tracing::error!(%error, "update stream failed");
+                            stream_failure = Some(error);
                             break;
                         }
                     }
@@ -153,7 +176,12 @@ impl Engine {
             }
         }
 
-        tracing::info!("finishing in-flight deliveries…");
+        if !tasks.is_empty() {
+            tracing::info!(
+                pending = tasks.len(),
+                "finishing in-flight deliveries — press Ctrl+C again to leave them"
+            );
+        }
         while tasks.join_next().await.is_some() {}
 
         // Persisting the update state lets a restart resume where we stopped
@@ -162,6 +190,14 @@ impl Engine {
             tracing::warn!(%error, "could not persist update state");
         }
         self.session.flush()?;
+
+        // Losing the update stream is not a clean stop. Exiting zero would tell
+        // a supervisor everything went fine and leave forwarding silently dead.
+        if let Some(error) = stream_failure {
+            return Err(color_eyre::eyre::eyre!(
+                "the connection to Telegram was lost: {error}"
+            ));
+        }
 
         Ok(())
     }
@@ -191,7 +227,7 @@ impl Engine {
         let snapshot = self.snapshotter.capture(chat_id, &message);
 
         if let Some(group) = snapshot.grouped_id {
-            self.buffer_album(group, snapshot, tasks);
+            self.buffer_album((chat_id, group), snapshot, tasks);
         } else {
             let context = self.context();
             dispatch(&context, &[snapshot], tasks);
@@ -199,14 +235,14 @@ impl Engine {
     }
 
     /// Collect album members, flushing the group once it stops growing.
-    fn buffer_album(&self, group: i64, snapshot: Arc<Snapshot>, tasks: &mut JoinSet<()>) {
+    fn buffer_album(&self, key: AlbumKey, snapshot: Arc<Snapshot>, tasks: &mut JoinSet<()>) {
         let albums = Arc::clone(&self.albums);
         let context = self.context();
 
         tasks.spawn(async move {
             let is_first = {
                 let mut buffered = albums.lock().await;
-                let entry = buffered.entry(group).or_default();
+                let entry = buffered.entry(key).or_default();
                 entry.push(snapshot);
                 entry.len() == 1
             };
@@ -218,10 +254,12 @@ impl Engine {
             }
 
             tokio::time::sleep(ALBUM_WINDOW).await;
-            let members = albums.lock().await.remove(&group).unwrap_or_default();
+            let mut members = albums.lock().await.remove(&key).unwrap_or_default();
             if members.is_empty() {
                 return;
             }
+
+            order_album(&mut members);
 
             let mut inner = JoinSet::new();
             dispatch(&context, &members, &mut inner);
@@ -237,6 +275,7 @@ impl Engine {
             session: Arc::clone(&self.session),
             stats: Arc::clone(&self.stats),
             permits: Arc::clone(&self.permits),
+            echo: Arc::clone(&self.echo),
         }
     }
 }
@@ -249,6 +288,7 @@ struct Context {
     session: Arc<FileSession>,
     stats: Arc<Stats>,
     permits: Arc<Semaphore>,
+    echo: Arc<EchoGuard>,
 }
 
 /// Fan a payload out to every target of every matching route.
@@ -261,7 +301,11 @@ fn dispatch(context: &Context, snapshots: &[Arc<Snapshot>], tasks: &mut JoinSet<
     };
 
     let candidate = Candidate {
-        text: primary.text.clone(),
+        // An album carries its caption on one member, not necessarily the first,
+        // so a keyword filter has to see the whole post. Judging it by one part
+        // would let `exclude` miss a banned word and `include` drop a group that
+        // does mention its keyword.
+        text: album_text(snapshots),
         kind: primary.kind,
         is_forward: primary.is_forward,
     };
@@ -284,11 +328,21 @@ fn dispatch(context: &Context, snapshots: &[Arc<Snapshot>], tasks: &mut JoinSet<
             let target = target.clone();
             let mode = binding.mode;
             let source_chat = primary.source_chat;
+            let message_id = primary.message_id;
 
             tasks.spawn(async move {
                 let Ok(_permit) = context.permits.acquire().await else {
                     return;
                 };
+
+                // The guard is populated once a delivery returns, which can race
+                // the update announcing that same delivery. Checking again here,
+                // after queueing, closes most of that window without the false
+                // positives a content-based guess would bring.
+                if context.echo.is_own(source_chat, message_id) {
+                    tracing::debug!(route = %route, "skipping a message this tool produced");
+                    return;
+                }
 
                 let Some(source_ref) = resolve(&context, &route, source_chat, "source").await
                 else {
@@ -306,7 +360,7 @@ fn dispatch(context: &Context, snapshots: &[Arc<Snapshot>], tasks: &mut JoinSet<
 
                 if let Err(error) = context
                     .dispatcher
-                    .deliver(&route, &payload, &target, target_ref, mode)
+                    .deliver(&route, payload, &target, target_ref, mode)
                     .await
                 {
                     tracing::warn!(route = %route, chat = %target.label, %error, "delivery failed");
@@ -314,6 +368,36 @@ fn dispatch(context: &Context, snapshots: &[Arc<Snapshot>], tasks: &mut JoinSet<
             });
         }
     }
+}
+
+/// Put an album back into the order it was posted in.
+///
+/// The buffer holds arrival order, and every member is buffered by its own task
+/// racing for the same lock, so it is not posting order even when the updates
+/// themselves arrive in sequence. Telegram numbers the members of a group
+/// consecutively, which makes the message ID the authority.
+fn order_album(members: &mut [Arc<Snapshot>]) {
+    members.sort_by_key(|snapshot| snapshot.message_id);
+}
+
+/// Every distinct piece of text in a post, for filtering purposes.
+fn album_text(snapshots: &[Arc<Snapshot>]) -> String {
+    let mut parts = snapshots
+        .iter()
+        .map(|snapshot| snapshot.text.as_str())
+        .filter(|text| !text.is_empty());
+
+    let Some(first) = parts.next() else {
+        return String::new();
+    };
+
+    // The overwhelmingly common case is a single caption; keep it allocation-free
+    // in shape by only building a joined string when there is more than one.
+    parts.fold(first.to_owned(), |mut joined, part| {
+        joined.push('\n');
+        joined.push_str(part);
+        joined
+    })
 }
 
 /// Resolve a chat ID against the session cache, reporting failures once.
@@ -334,5 +418,59 @@ async fn resolve(
         );
         tracing::warn!(route = %route, chat = %label, chat_id, "chat is not in the session cache");
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn album(texts: &[&str]) -> Vec<Arc<Snapshot>> {
+        texts
+            .iter()
+            .enumerate()
+            .map(|(index, text)| {
+                Arc::new(Snapshot::for_test(
+                    i32::try_from(index).expect("small") + 1,
+                    text,
+                ))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_lone_caption_is_the_filter_text_unchanged() {
+        assert_eq!(album_text(&album(&["breaking news", ""])), "breaking news");
+    }
+
+    #[test]
+    fn every_part_of_an_album_is_visible_to_the_filter() {
+        // The caption is not guaranteed to be on the member that happens to be
+        // first, so judging the post by one part would let `exclude` miss a
+        // banned word sitting on another.
+        let text = album_text(&album(&["", "sponsored", "quiz"]));
+        assert!(text.contains("sponsored"), "{text}");
+        assert!(text.contains("quiz"), "{text}");
+    }
+
+    #[test]
+    fn a_captionless_album_yields_no_text() {
+        assert_eq!(album_text(&album(&["", "", ""])), "");
+        assert_eq!(album_text(&[]), "");
+    }
+
+    #[test]
+    fn an_album_buffered_out_of_order_is_posted_in_order() {
+        // Each member is buffered by its own task racing for the same lock, so
+        // arrival order is not posting order even when the updates are in
+        // sequence. Delivering them shuffled scrambles the album in the target.
+        let mut members = album(&["a", "b", "c"]);
+        members.reverse();
+        order_album(&mut members);
+
+        let ids: Vec<i32> = members.iter().map(|member| member.message_id).collect();
+        assert_eq!(ids, vec![1, 2, 3]);
+        // The caption seen by the filter follows the same order.
+        assert_eq!(album_text(&members), "a\nb\nc");
     }
 }
