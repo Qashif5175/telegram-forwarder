@@ -209,19 +209,58 @@ tgfwd route list                    # shows the names
 
 ## Filtering
 
-Optional, per route. Every condition is ANDed, and keyword matching is
-case-insensitive substring matching — no regex dialect to learn.
+Optional, per route. Every condition is ANDed — a message has to satisfy all of
+them to be forwarded.
 
 | Setting | Effect |
 |---|---|
-| `include` | message must contain at least one of these |
-| `exclude` | message is dropped if it contains any of these |
-| `kinds` | only these media kinds pass (`photo`, `video`, `document`, …) |
-| `require_media` | drop plain-text messages |
+| `include` | drop the message unless it contains at least one of these |
+| `exclude` | drop the message if it contains any of these |
+| `kinds` | drop the message unless it is one of these kinds |
+| `require_media` | drop messages carrying no media |
 | `skip_forwarded` | drop messages that are themselves forwards |
 
-For an album, all of the captions are considered together, so a keyword sitting
-on the third photo still counts.
+### What `include` and `exclude` match against
+
+The **message text** — and for a photo, video or file, that means its **caption**,
+since Telegram stores them in the same place. Nothing else is searched: not the
+sender, not the file name, not the contents of the file.
+
+Matching is **case-insensitive substring** matching. There is no regex dialect
+and no word-boundary rule:
+
+- `urgent` matches `URGENT`, `Urgently`, and also `insurgent`
+- `快訊` matches `【快訊】今日重點`
+- `exclude` is checked first, so a message matching both is dropped
+
+Two consequences worth knowing before you rely on them:
+
+> **An `include` filter drops every post that has no caption.** A photo posted
+> with no text has nothing to match, so `include = ["urgent"]` on a photo channel
+> keeps only the captioned photos. If you want media regardless of wording, use
+> `kinds` or `require_media` instead.
+
+> **For an album, all the captions are searched together.** Telegram puts the
+> caption on one member of the group, not necessarily the first, so the whole
+> post is judged as a whole — a keyword on the third photo still counts, and a
+> blocked word anywhere drops the entire group.
+
+### What `skip_forwarded` is for
+
+It drops messages that already carry Telegram's "Forwarded from" header — that
+is, posts the source chat did not write itself but relayed from somewhere else.
+
+Two situations it exists for:
+
+- **Aggregator channels.** Many channels repost other channels. If you only want
+  what this one actually publishes, this removes the relayed noise.
+- **Avoiding duplicates.** If you already mirror the original channel, its posts
+  would otherwise reach your target twice — once from the original, once via
+  whoever reposted it.
+
+It says nothing about *this* tool's own deliveries. Those are recognised
+separately and are never treated as new source material, whether or not you set
+this.
 
 ## Running it
 

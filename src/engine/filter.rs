@@ -202,6 +202,40 @@ mod tests {
     }
 
     #[test]
+    fn an_include_filter_drops_media_that_carries_no_caption() {
+        // Worth stating outright, because it surprises people: keywords are
+        // matched against the text, and a photo posted without a caption has
+        // none. An `include` filter therefore keeps *only* captioned posts.
+        let filter = Filter {
+            include: vec!["urgent".to_owned()],
+            ..Filter::default()
+        };
+
+        let captionless = Candidate {
+            kind: MediaKind::Photo,
+            ..candidate("")
+        };
+        assert_eq!(
+            evaluate(&filter, &captionless),
+            Err(Rejection::MissingKeyword)
+        );
+    }
+
+    #[test]
+    fn keywords_match_anywhere_including_inside_longer_words() {
+        // Substring matching, not word matching. It is what people expect from
+        // "contains" and it is fast, but it does mean a short keyword can match
+        // a word that merely contains it.
+        let filter = Filter {
+            include: vec!["urgent".to_owned()],
+            ..Filter::default()
+        };
+
+        assert!(evaluate(&filter, &candidate("acting urgently")).is_ok());
+        assert!(evaluate(&filter, &candidate("the insurgent group")).is_ok());
+    }
+
+    #[test]
     fn keyword_matching_ignores_case() {
         let filter = Filter {
             include: vec!["Urgent".to_owned()],
