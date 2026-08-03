@@ -35,22 +35,31 @@ fn render_config() -> RenderConfig<'static> {
         )
 }
 
+/// The user backed out of a prompt.
+///
+/// A distinct type rather than a message, so that adding context to the error on
+/// the way up cannot turn a cancellation into a crash report.
+#[derive(Debug, thiserror::Error)]
+#[error("cancelled")]
+pub struct Cancelled;
+
 /// Translate inquire's cancellation into an ordinary error.
 ///
 /// Pressing Esc or Ctrl+C is a normal way to leave a prompt, so it should read
 /// as "cancelled", not as a crash.
 fn map_error(err: InquireError) -> color_eyre::eyre::Report {
     match err {
-        InquireError::OperationCanceled | InquireError::OperationInterrupted => {
-            color_eyre::eyre::eyre!("cancelled")
-        }
+        InquireError::OperationCanceled | InquireError::OperationInterrupted => Cancelled.into(),
         other => other.into(),
     }
 }
 
 /// Whether an error came from the user cancelling a prompt.
+///
+/// The whole chain is searched: a cancellation that picked up context on its way
+/// out is still a cancellation.
 pub fn is_cancellation(err: &color_eyre::eyre::Report) -> bool {
-    err.to_string() == "cancelled"
+    err.chain().any(<dyn std::error::Error>::is::<Cancelled>)
 }
 
 /// Run a blocking prompt without stalling the async runtime.
@@ -241,6 +250,19 @@ pub async fn pick_chats(
 
 /// Ask a free-text question.
 pub async fn text(message: impl Into<String>, help: Option<&str>) -> Result<String> {
+    edit_text(message, help, String::new()).await
+}
+
+/// Ask a free-text question with `current` already in the buffer.
+///
+/// Editing anything means starting from what is already configured. Re-typing a
+/// value the file already holds is exactly what this tool refuses to ask for
+/// elsewhere, and keywords are no easier to recall than chat titles.
+pub async fn edit_text(
+    message: impl Into<String>,
+    help: Option<&str>,
+    current: String,
+) -> Result<String> {
     let message = message.into();
     let help = help.map(str::to_owned);
 
@@ -248,6 +270,9 @@ pub async fn text(message: impl Into<String>, help: Option<&str>) -> Result<Stri
         let mut prompt = Text::new(&message).with_render_config(render_config());
         if let Some(help) = &help {
             prompt = prompt.with_help_message(help);
+        }
+        if !current.is_empty() {
+            prompt = prompt.with_initial_value(&current);
         }
         prompt.prompt().map_err(map_error)
     })
@@ -329,6 +354,46 @@ where
     .await
 }
 
+/// Choose any number of items from a list of labels.
+///
+/// `preselected` starts those entries checked, so editing an existing set is a
+/// matter of toggling rather than rebuilding it.
+pub async fn select_many<T>(
+    message: impl Into<String>,
+    options: Vec<(String, T)>,
+    preselected: &[usize],
+) -> Result<Vec<T>>
+where
+    T: Send + 'static,
+{
+    let message = message.into();
+    let preselected = preselected.to_vec();
+
+    blocking(move || {
+        let labels: Vec<String> = options.iter().map(|(label, _)| label.clone()).collect();
+
+        // `raw_prompt` reports the index within the original list, which is what
+        // maps a choice back to its value. Matching on the label instead would
+        // pick the wrong value the moment two labels ever coincide.
+        let chosen = MultiSelect::new(&message, labels)
+            .with_render_config(render_config())
+            .with_default(&preselected)
+            .with_page_size(13)
+            .with_help_message("↑↓ move · space select · → all · ← none · enter confirm")
+            .raw_prompt()
+            .map_err(map_error)?;
+
+        let picked: Vec<usize> = chosen.iter().map(|option| option.index).collect();
+        Ok(options
+            .into_iter()
+            .enumerate()
+            .filter(|(index, _)| picked.contains(index))
+            .map(|(_, (_, value))| value)
+            .collect())
+    })
+    .await
+}
+
 /// Drives the sign-in flow through the terminal.
 #[derive(Debug, Default)]
 pub struct TerminalLoginPrompt;
@@ -388,6 +453,24 @@ mod tests {
             kind: ChatKind::Channel,
             likely_writable: true,
         }
+    }
+
+    #[test]
+    fn a_cancellation_survives_being_given_context() {
+        use color_eyre::eyre::Context as _;
+
+        let cancelled: color_eyre::eyre::Report = Cancelled.into();
+        assert!(is_cancellation(&cancelled));
+
+        // Anything on the way up may add context; that must not turn a plain
+        // "cancelled" into a crash report and a non-zero exit code.
+        let wrapped = Err::<(), _>(cancelled)
+            .wrap_err("while editing the route")
+            .unwrap_err();
+        assert!(is_cancellation(&wrapped));
+
+        let unrelated = color_eyre::eyre::eyre!("the chat is unknown to this account");
+        assert!(!is_cancellation(&unrelated));
     }
 
     #[test]

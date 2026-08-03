@@ -66,7 +66,7 @@ pub async fn add(paths: &Paths) -> Result<()> {
         enabled: true,
         sources: sources.iter().map(PeerLink::from).collect(),
         targets: targets.iter().map(PeerLink::from).collect(),
-        mode: Some(mode),
+        mode: override_mode(mode, &config),
         filter,
     });
 
@@ -90,6 +90,15 @@ pub async fn add(paths: &Paths) -> Result<()> {
     );
 
     connection.shutdown().await
+}
+
+/// Record a delivery mode only when it differs from the configured default.
+///
+/// Writing the chosen mode unconditionally would pin every route to whatever it
+/// was created with and make `defaults.mode` a setting that never applies to
+/// anything, which is not what the file says it does.
+fn override_mode(chosen: DeliveryMode, config: &Config) -> Option<DeliveryMode> {
+    (chosen != config.defaults.mode).then_some(chosen)
 }
 
 /// Point out targets the account probably cannot post into.
@@ -222,40 +231,80 @@ async fn ask_for_mode_starting_at(current: DeliveryMode) -> Result<DeliveryMode>
     .await
 }
 
-/// Optionally build a content filter.
+/// Ask whether a brand-new route wants a filter, and build it if so.
 async fn ask_for_filter() -> Result<Filter> {
-    if !prompts::confirm("Add a content filter?", false).await? {
+    if prompts::confirm("Add a content filter?", false).await? {
+        edit_filter(&Filter::default()).await
+    } else {
+        Ok(Filter::default())
+    }
+}
+
+/// Revise an existing filter, offering every current value back.
+///
+/// Nothing here starts from blank when there is already an answer in the file:
+/// a filter is edited by adjusting what it says, not by remembering and retyping
+/// it. Clearing one is an explicit choice, not the default outcome of pressing
+/// enter through the questions.
+async fn edit_filter(current: &Filter) -> Result<Filter> {
+    if !current.is_empty()
+        && prompts::confirm(
+            &format!("Remove the filter entirely? ({})", describe_filter(current)),
+            false,
+        )
+        .await?
+    {
         return Ok(Filter::default());
     }
 
     let mut filter = Filter::default();
 
-    let include = prompts::text(
+    let include = prompts::edit_text(
         "Only forward messages containing (comma-separated, blank for all)",
         Some("matched case-insensitively anywhere in the text"),
+        current.include.join(", "),
     )
     .await?;
     filter.include = split_keywords(&include);
 
-    let exclude =
-        prompts::text("Never forward messages containing (comma-separated)", None).await?;
+    let exclude = prompts::edit_text(
+        "Never forward messages containing (comma-separated)",
+        None,
+        current.exclude.join(", "),
+    )
+    .await?;
     filter.exclude = split_keywords(&exclude);
 
-    if prompts::confirm("Restrict to certain media kinds?", false).await? {
+    if prompts::confirm(
+        "Restrict to certain media kinds?",
+        !current.kinds.is_empty(),
+    )
+    .await?
+    {
         let options: Vec<(String, MediaKind)> = MediaKind::ALL
             .iter()
             .map(|kind| (kind.to_string(), *kind))
             .collect();
+        let preselected: Vec<usize> = MediaKind::ALL
+            .iter()
+            .enumerate()
+            .filter(|(_, kind)| current.kinds.contains(kind))
+            .map(|(index, _)| index)
+            .collect();
 
-        // A multi-select over kinds would be nicer, but `select` keeps the
-        // dependency surface small; repeat the command to add more kinds.
-        let chosen = prompts::select("Which kind?", options).await?;
-        filter.kinds.insert(chosen);
+        filter.kinds = prompts::select_many("Which kinds?", options, &preselected)
+            .await?
+            .into_iter()
+            .collect();
     }
 
-    filter.require_media = prompts::confirm("Skip messages with no media?", false).await?;
-    filter.skip_forwarded =
-        prompts::confirm("Skip messages that are themselves forwards?", false).await?;
+    filter.require_media =
+        prompts::confirm("Skip messages with no media?", current.require_media).await?;
+    filter.skip_forwarded = prompts::confirm(
+        "Skip messages that are themselves forwards?",
+        current.skip_forwarded,
+    )
+    .await?;
 
     Ok(filter)
 }
@@ -358,7 +407,7 @@ fn describe_filter(filter: &Filter) -> String {
 /// the parts you are happy with costs nothing. Only the chat pickers need a
 /// connection, so changing a mode or a filter stays offline and instant.
 pub async fn edit(paths: &Paths, route: Option<String>) -> Result<()> {
-    let mut config = super::load_config_with_credentials(paths).await?;
+    let config = Config::load(paths)?;
     let id = resolve_route_id(&config, route, Selectable::Any).await?;
 
     let Some(existing) = config.route(&id).cloned() else {
@@ -386,7 +435,15 @@ pub async fn edit(paths: &Paths, route: Option<String>) -> Result<()> {
     )
     .await?;
 
-    // Only the two chat pickers need the dialog list.
+    // Only the two chat pickers need the dialog list, so the other two aspects
+    // never ask for API credentials and never open a connection. Re-reading the
+    // file here matters: prompting for credentials writes them to disk, and this
+    // copy would otherwise overwrite them again on save.
+    let mut config = match aspect {
+        Aspect::Sources | Aspect::Targets => super::load_config_with_credentials(paths).await?,
+        Aspect::Mode | Aspect::Filter => config,
+    };
+
     let connection = match aspect {
         Aspect::Sources | Aspect::Targets => {
             let (connection, chats) = super::fetch_chats(paths, &config).await?;
@@ -407,16 +464,17 @@ pub async fn edit(paths: &Paths, route: Option<String>) -> Result<()> {
 
         Aspect::Mode => {
             let mode = ask_for_mode_starting_at(current_mode).await?;
+            let stored = override_mode(mode, &config);
             for route in &mut config.routes {
                 if route.id == id {
-                    route.mode = Some(mode);
+                    route.mode = stored;
                 }
             }
             None
         }
 
         Aspect::Filter => {
-            let filter = ask_for_filter().await?;
+            let filter = edit_filter(&existing.filter).await?;
             for route in &mut config.routes {
                 if route.id == id {
                     route.filter = filter.clone();
