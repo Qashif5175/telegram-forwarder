@@ -336,7 +336,23 @@ form Telegram Desktop shows; titles are labels only, refreshed by
 `tgfwd route sync`.
 
 Pacing is enforced **per target chat**, so fanning out to ten channels runs at
-full speed while one busy channel is throttled on its own.
+full speed while one busy channel is throttled on its own. An album counts once,
+not once per photo.
+
+### Tuning `per_target_interval`
+
+It only bites during a burst into a single chat — a channel posting a few times a
+minute never touches it. The trade it makes is deliberately lopsided: a few
+hundred milliseconds spent here costs exactly that, while earning a `FLOOD_WAIT`
+instead costs whatever Telegram decides, holds a delivery slot while it waits,
+and fails outright once the wait exceeds `max_flood_wait`.
+
+The default is a conservative guess, not a derived figure — Telegram does not
+publish the limits that apply to user accounts, and the numbers usually quoted
+are the Bot API's, which do not. So tune it by observation rather than by
+arithmetic: **the `waiting` counter on the dashboard is the signal.** If it sits
+above zero, the interval is too short for your traffic. Setting it to `0`
+disables pacing altogether.
 
 ## Loop protection
 

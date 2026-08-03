@@ -219,7 +219,21 @@ pub struct DispatchPolicy {
     ///
     /// Telegram rate-limits per destination, so this is enforced per target
     /// rather than globally: fanning out to ten different channels at once is
-    /// fine, hammering one channel is not.
+    /// fine, hammering one channel is not. An album counts once, not once per
+    /// member, since the group is delivered as a single message.
+    ///
+    /// This is preventive, and the trade it makes is asymmetric. Spending a few
+    /// hundred milliseconds here costs exactly that; earning a `FLOOD_WAIT`
+    /// instead costs whatever Telegram decides, which is measured in seconds to
+    /// minutes, holds an in-flight slot while it sleeps, counts against
+    /// [`Self::max_attempts`], and fails the delivery outright once it exceeds
+    /// [`Self::max_flood_wait`].
+    ///
+    /// The default is a conservative guess rather than a derived figure:
+    /// Telegram does not publish the limits that apply to user accounts, and the
+    /// numbers that circulate are the Bot API's, which do not. Treat the
+    /// `waiting` counter on the dashboard as the real signal — if it sits above
+    /// zero, this is too low for the traffic. Zero disables pacing entirely.
     #[serde(default = "default_per_target_interval", with = "humantime_serde")]
     pub per_target_interval: Duration,
 
