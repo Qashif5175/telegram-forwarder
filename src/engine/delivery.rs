@@ -365,10 +365,14 @@ impl Dispatcher {
                         self.echo.remember(target.id, *id);
                     }
 
-                    return if sent.refused.is_empty() {
-                        Outcome::Delivered
-                    } else {
-                        Outcome::Partial(sent.refused)
+                    return match (sent.delivered.is_empty(), sent.refused.is_empty()) {
+                        (_, true) => Outcome::Delivered,
+                        // Nothing at all was accepted. That is an ordinary
+                        // refusal of the whole post, not a partial success, and
+                        // calling it partial would count a later rung's success
+                        // as a rescue and report a misleading "0 of 3 parts".
+                        (true, false) => Outcome::Degraded(Degrade::SourceGone),
+                        (false, false) => Outcome::Partial(sent.refused),
                     };
                 }
 

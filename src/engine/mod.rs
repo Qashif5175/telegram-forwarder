@@ -261,6 +261,18 @@ impl Engine {
 
             order_album(&mut members);
 
+            // An album is the one path that can go quiet without anything to
+            // show for it: several updates arrive, one task waits, and the whole
+            // group either goes out as a unit or does not. Say how many parts
+            // were collected so a group that never leaves can be told apart from
+            // one that was never gathered.
+            tracing::debug!(
+                chat = key.0,
+                group = key.1,
+                parts = members.len(),
+                "album window closed, dispatching"
+            );
+
             let mut inner = JoinSet::new();
             dispatch(&context, &members, &mut inner);
             while inner.join_next().await.is_some() {}
