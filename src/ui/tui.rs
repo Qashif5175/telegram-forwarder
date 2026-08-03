@@ -5,6 +5,7 @@
 //! is rate-limited, and what was rescued from a deletion — are visible at once
 //! rather than scrolled past.
 
+use std::io::IsTerminal as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,6 +24,28 @@ use crate::ui::{logger, theme};
 /// How often the dashboard repaints.
 const FRAME_INTERVAL: Duration = Duration::from_millis(250);
 
+/// Refuse the dashboard when its output is not going to a terminal.
+///
+/// Nothing downstream detects this for itself: `ratatui` enables raw mode
+/// through `/dev/tty` and writes its escape sequences to stdout, and both of
+/// those succeed against a pipe or a file. A redirected run therefore starts
+/// happily, fills a log with control codes, displays nothing, and still leaves
+/// the terminal in raw mode.
+///
+/// Callers check this *before* signing in. Authenticating and pulling the whole
+/// dialog list, only to report that there is nowhere to draw, wastes the most
+/// rate-limited part of the program on a question answerable up front.
+pub fn ensure_drawable() -> Result<()> {
+    if std::io::stdout().is_terminal() {
+        return Ok(());
+    }
+
+    Err(color_eyre::eyre::eyre!(
+        "--tui needs a terminal to draw on, and this output is redirected. \
+         Run without --tui to use plain logs"
+    ))
+}
+
 /// Run the dashboard until the user quits or `shutdown` fires.
 ///
 /// Whatever happens — a clean quit, a terminal error, a panic unwinding through
@@ -34,8 +57,13 @@ pub async fn run(
     mut shutdown: watch::Receiver<bool>,
     shutdown_tx: watch::Sender<bool>,
 ) -> Result<()> {
-    // `try_init` rather than `init`: the latter panics, and "there is no terminal
-    // to draw on" is an ordinary thing to tell someone who piped the output.
+    if let Err(error) = ensure_drawable() {
+        let _ = shutdown_tx.send(true);
+        return Err(error);
+    }
+
+    // `try_init` rather than `init`: the latter panics, and a terminal that
+    // cannot be prepared is an ordinary thing to report.
     let terminal = ratatui::try_init();
 
     // `ratatui` takes an alternate screen buffer on stdout; anything written to

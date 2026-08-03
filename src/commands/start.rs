@@ -13,6 +13,13 @@ use super::say;
 
 /// Start forwarding until interrupted.
 pub async fn run(paths: &Paths, use_tui: bool, catch_up: bool) -> Result<()> {
+    // Asked before anything expensive: signing in is the most rate-limited thing
+    // this tool does, and "there is nowhere to draw the dashboard" is knowable
+    // without contacting Telegram at all.
+    if use_tui {
+        tui::ensure_drawable()?;
+    }
+
     let config = super::load_config_with_credentials(paths).await?;
     config.validate()?;
 
