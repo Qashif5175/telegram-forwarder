@@ -1,0 +1,7 @@
+# Normalise line endings on the way into the repository.
+#
+# `.editorconfig` asks editors for LF, but it cannot bind anything that does not
+# read it — a checkout on Windows with `core.autocrlf=true`, a patch applied by
+# tooling, a file pasted in through a browser. This settles it in the one place
+# every one of those has to pass through.
+* text=auto eol=lf
