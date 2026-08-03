@@ -416,7 +416,13 @@ pub async fn edit(paths: &Paths, route: Option<String>) -> Result<()> {
 
     let current_mode = existing.mode(&config.defaults);
     let aspect = prompts::select(
-        format!("Editing {} — what would you like to change?", existing.id),
+        // What it moves, not what it is called. With one route configured the
+        // picker above is skipped entirely, so this line is the only thing
+        // telling the user which route they are about to change.
+        format!(
+            "Editing {} — what would you like to change?",
+            describe_route(&existing)
+        ),
         vec![
             (
                 format!("Sources        ({})", summarise(&existing.sources)),
@@ -552,11 +558,20 @@ pub async fn remove(paths: &Paths, route: Option<String>) -> Result<()> {
     let mut config = Config::load(paths)?;
     let id = resolve_route_id(&config, route, Selectable::Any).await?;
 
-    if config.route(&id).is_none() {
+    let Some(doomed) = config.route(&id) else {
         bail!("{}", unknown_route(&config, &id));
-    }
+    };
 
-    if !prompts::confirm(format!("Delete route '{id}'?"), false).await? {
+    // Naming what is about to be destroyed by what it moves, not by its
+    // identifier. Deleting is the one action nobody can undo, and with a single
+    // route configured the picker is skipped, so this prompt may be the first
+    // and last chance to notice it is the wrong one.
+    if !prompts::confirm(
+        format!("Delete this route? {}", describe_route(doomed)),
+        false,
+    )
+    .await?
+    {
         say(Level::Info, "cancelled");
         return Ok(());
     }
@@ -878,6 +893,38 @@ mod tests {
         assert!(Selectable::Enabled.accepts(true));
         assert!(!Selectable::Enabled.accepts(false));
         assert!(Selectable::Any.accepts(true) && Selectable::Any.accepts(false));
+    }
+
+    #[test]
+    fn a_route_is_named_to_the_user_by_what_it_moves() {
+        // The identifier is for logs, the dashboard and shell scripts. When a
+        // route is put in front of a person — especially at the two points where
+        // the picker is skipped because there is only one — it has to be named
+        // by what it moves, or the prompt says nothing they can act on.
+        let route = Route {
+            id: "self".to_owned(),
+            enabled: true,
+            sources: vec![PeerLink {
+                id: -1001,
+                title: "Breaking News".to_owned(),
+                username: None,
+            }],
+            targets: vec![PeerLink {
+                id: -2001,
+                title: "Team channel".to_owned(),
+                username: None,
+            }],
+            mode: None,
+            filter: Filter::default(),
+        };
+
+        let described = describe_route(&route);
+        assert!(described.contains("Breaking News"), "{described}");
+        assert!(described.contains("Team channel"), "{described}");
+        assert!(
+            !described.contains("self"),
+            "the identifier is not what a person recognises: {described}"
+        );
     }
 
     #[tokio::test]
