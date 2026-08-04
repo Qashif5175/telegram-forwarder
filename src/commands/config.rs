@@ -18,6 +18,11 @@ use super::say;
 /// `tgfwd config path`
 ///
 /// Printed on stdout, alone, so it composes: `$EDITOR "$(tgfwd config path)"`.
+///
+/// The only `println!` in the crate, and the reason stdout is off limits
+/// everywhere else: anything else printed there would end up inside the
+/// substitution alongside the path.
+#[allow(clippy::disallowed_macros, reason = "this is the composable output")]
 pub fn path(paths: &Paths) {
     println!("{}", paths.config_file().display());
 }

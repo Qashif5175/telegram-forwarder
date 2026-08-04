@@ -171,6 +171,19 @@ has no library target, and that command errors out rather than finding nothing.
 Exceptions to clippy's pedantic set live in `Cargo.toml` under `[lints.clippy]`,
 each with a written justification. Add to that list only with a reason.
 
+`clippy.toml` holds the rules the compiler cannot see, so that they fail a build
+rather than only appearing in this file:
+
+- **stdout belongs to `tgfwd config path`.** `println!` is disallowed, with one
+  allowed use at that command. Anything else printed there lands inside
+  `$(tgfwd config path)`.
+- **`std::fs` is disallowed in favour of `fs_err`**, whose errors name the file
+  they failed on. `session.rs` opts out where it needs the Unix `mode` extension.
+- **A `DashMap` reference must not be held across an await.** Doing so deadlocks
+  the next task to touch the same shard, and every caller of `Stats` is inside a
+  delivery task that awaits the network. Verified to fire against a bound
+  `Ref`; note it does not catch an `Option<Ref>`.
+
 ## What happens when the network drops
 
 Traced rather than assumed, because the behaviour is not what it looks like from

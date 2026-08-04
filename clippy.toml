@@ -1,0 +1,38 @@
+# Rules the compiler cannot see, written down where they are enforced rather
+# than only in AGENTS.md. Lint *levels* live in Cargo.toml under
+# `[lints.clippy]`; this file is for the lints that take parameters.
+
+# Nothing depends on this crate — it builds one binary — so clippy is free to
+# suggest improvements that would break a public API.
+avoid-breaking-exported-api = false
+
+disallowed-macros = [
+  { path = "std::println", reason = "stdout is reserved for output meant to be piped, e.g. `$EDITOR \"$(tgfwd config path)\"`; use eprintln! for anything a human reads" },
+  { path = "std::print", reason = "stdout is reserved for output meant to be piped; use eprint!" },
+]
+
+disallowed-methods = [
+  # `fs_err` is a dependency for one reason: its errors name the file they
+  # failed on, which is most of what makes a config or session error useful.
+  { path = "std::fs::read", reason = "use fs_err::read, so the error names the file" },
+  { path = "std::fs::write", reason = "use fs_err::write, so the error names the file" },
+  { path = "std::fs::read_to_string", reason = "use fs_err::read_to_string, so the error names the file" },
+  { path = "std::fs::read_dir", reason = "use fs_err::read_dir, so the error names the file" },
+  { path = "std::fs::remove_file", reason = "use fs_err::remove_file, so the error names the file" },
+  { path = "std::fs::rename", reason = "use fs_err::rename, so the error names the file" },
+  { path = "std::fs::create_dir_all", reason = "use fs_err::create_dir_all, so the error names the file" },
+  { path = "std::fs::metadata", reason = "use fs_err::metadata, so the error names the file" },
+  { path = "std::fs::set_permissions", reason = "use fs_err::set_permissions, so the error names the file" },
+]
+
+# Holding a `DashMap` reference across an await deadlocks if the same thread
+# comes back for the same shard. Every caller of `Stats` is inside a delivery
+# task, so this is one refactor away at any time: the counters are read and
+# written from async code that already awaits the network in between.
+[[await-holding-invalid-types]]
+path = "dashmap::mapref::one::Ref"
+reason = "a delivery task awaiting while holding this deadlocks the next one to touch the same route"
+
+[[await-holding-invalid-types]]
+path = "dashmap::mapref::one::RefMut"
+reason = "a delivery task awaiting while holding this deadlocks the next one to touch the same route"
