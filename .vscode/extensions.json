@@ -1,0 +1,7 @@
+{
+  // Naming a formatter in settings.json only works if it is installed;
+  // otherwise saving quietly does nothing. This is the prompt that gets it
+  // installed, and it is a recommendation rather than a requirement — the
+  // command line is `just check`, and nothing here is needed to run it.
+  "recommendations": ["rust-lang.rust-analyzer"]
+}

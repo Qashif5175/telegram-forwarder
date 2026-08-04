@@ -1,0 +1,32 @@
+{
+  // Committed so that saving a file in this repository does the same thing for
+  // everybody, and the same thing `just fmt` and `just lint` do. Nothing here
+  // is a preference — it is the project's own checks, moved earlier.
+
+  // `rustfmt`, through the extension that ships it. `just fmt` runs
+  // `cargo fmt --all --check`, so formatting on save is that check, passed
+  // before it is ever run.
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true
+  },
+
+  // The editor should fail on exactly what CI fails on. Without these,
+  // rust-analyzer runs plain `cargo check`, which is quieter than `just lint`
+  // in both directions: no pedantic lints, and nothing from tests.
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.extraArgs": ["--all-targets"],
+
+  // The prose in README.md and AGENTS.md is wrapped by hand at 80 columns.
+  // Every Markdown formatter reflows it, which rewrites both files entirely and
+  // produces a diff nothing in CI can check. Off here rather than left to
+  // whatever each person has set globally.
+  "[markdown]": {
+    "editor.formatOnSave": false
+  }
+
+  // TOML is deliberately absent. `just fmt` does not check it, so any formatter
+  // named here would rewrite Cargo.toml, clippy.toml and deny.toml — comments,
+  // spacing and all — to a standard the project does not have and CI does not
+  // enforce.
+}
