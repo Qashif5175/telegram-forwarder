@@ -168,7 +168,13 @@ The tools they need are `just`, `typos`, `actionlint`, `zizmor` and
 
 CI runs exactly these on every push and pull request, with warnings promoted to
 errors and `--locked` so a dependency bumped without committing `Cargo.lock`
-fails there rather than drifting. There is no `cargo test --doc` step: this crate
+fails there rather than drifting. The linting runs once, on Linux; the tests run
+on Linux, macOS **and** Windows, because the session file's permissions, the
+config directory layout and the editor `config edit` reaches for all differ
+there, and compiling proves none of them still work.
+
+The recipes put the cargo bin directory on `PATH` themselves and choose the
+separator by platform, so a Windows checkout needs nothing added to a profile. There is no `cargo test --doc` step: this crate
 has no library target, and that command errors out rather than finding nothing.
 
 Exceptions to clippy's pedantic set live in `Cargo.toml` under `[lints.clippy]`,

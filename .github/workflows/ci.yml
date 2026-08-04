@@ -50,14 +50,14 @@ jobs:
 
       - run: just fmt
       - run: just lint
-      - run: just test
       - run: just unused
       - run: just spell
 
-  # Separate because it is the platforms that are being tested, not the checks:
-  # the session file's permissions and the config directory layout both differ
-  # on Windows, and building on Linux alone exercises neither.
-  build:
+  # Separate because it is the platforms being tested, not the checks. The
+  # session file's permissions, the config directory layout and the editor the
+  # `config edit` command reaches for all differ on Windows, and a matrix that
+  # only compiled would prove none of them still work.
+  test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -77,4 +77,5 @@ jobs:
         with:
           tool: just
 
+      - run: just test
       - run: just build

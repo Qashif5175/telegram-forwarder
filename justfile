@@ -7,10 +7,20 @@
 #
 # Needs `just` itself, then `just setup` for everything the recipes call.
 
-# `cargo install` puts binaries in ~/.cargo/bin. Prepending it here means the
-# recipes work whether or not the surrounding shell happens to have it, rather
-# than failing with a bare "command not found" that says nothing about why.
-export PATH := env_var('HOME') / '.cargo/bin:' + env_var('PATH')
+# `cmd.exe` cannot run these recipes as written; PowerShell can.
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+
+# `cargo install` puts binaries in the cargo bin directory. Prepending it here
+# means the recipes work whether or not the surrounding shell happens to have
+# it, rather than failing with a bare "command not found" that says nothing
+# about why. `home_directory()` and `/` are platform-aware; the separator
+# between PATH entries is not, so it is chosen explicitly.
+cargo-bin := home_directory() / ".cargo" / "bin"
+export PATH := if os_family() == "windows" {
+  cargo-bin + ";" + env_var("PATH")
+} else {
+  cargo-bin + ":" + env_var("PATH")
+}
 
 # Show the available recipes.
 default:
@@ -25,7 +35,7 @@ default:
 setup:
     cargo install cargo-binstall
     cargo binstall --no-confirm cargo-shear cargo-deny git-cliff typos-cli zizmor
-    @echo "actionlint is not a crate — install it with: brew install actionlint"
+    @echo "actionlint is not a crate. See https://github.com/rhysd/actionlint/releases"
 
 # Run every check CI runs, across all of its workflows.
 check: fmt lint test unused spell workflows release-check

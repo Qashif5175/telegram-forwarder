@@ -446,12 +446,15 @@ just fix        # rewrite formatting in place
 CI runs the same recipes, so a clean `just check` is a clean pipeline.
 
 ```sh
-brew install just actionlint   # actionlint is Go, not a crate
+brew install just actionlint   # macOS; on Windows use `winget install --id Casey.Just`
 just setup                     # the rest, as prebuilt binaries
 ```
 
-`just setup` installs into `~/.cargo/bin`; the recipes put that on `PATH`
-themselves, so nothing needs adding to your shell profile.
+`actionlint` is written in Go and is not a crate, so it comes from a package
+manager or [its releases page](https://github.com/rhysd/actionlint/releases);
+`just setup` fetches everything else. Installs land in the cargo bin directory,
+which the recipes put on `PATH` themselves — nothing to add to a shell profile,
+on any platform.
 
 CI also builds for release on Linux, macOS and Windows: the session file's
 permissions and the config directory layout both differ on Windows, and building
