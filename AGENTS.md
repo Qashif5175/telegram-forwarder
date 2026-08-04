@@ -159,7 +159,10 @@ CI runs these same recipes rather than its own copy of the commands, so what
 passes locally is what passes on push. Before the `justfile` existed the two had
 already drifted: the documented lint did not fail on a warning while CI's did.
 
-Individually: `just fmt`, `lint`, `test`, `unused`, `spell`, `workflows`, `build`.
+Individually: `just fmt`, `lint`, `test`, `unused`, `spell`, `workflows`, `audit`,
+`build`. `audit` also runs weekly on its own, because an advisory published
+against a crate already in the lock file turns a passing commit red without
+anybody touching the repository.
 The tools they need are `just`, `typos`, `actionlint`, `zizmor` and
 `cargo-shear`; the header of the `justfile` lists how to install them.
 

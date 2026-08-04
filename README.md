@@ -423,6 +423,7 @@ CI runs the same recipes, so a clean `just check` is a clean pipeline.
 ```sh
 brew install just actionlint   # actionlint is Go, not a crate
 just setup                     # the rest, as prebuilt binaries
+just audit                     # dependency licences and security advisories
 ```
 
 CI also builds for release on Linux, macOS and Windows: the session file's

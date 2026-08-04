@@ -12,6 +12,11 @@ disallowed-macros = [
 ]
 
 disallowed-methods = [
+  # Hardcoded colours ignore the user's terminal theme; the named ANSI ones are
+  # remapped by it. The dashboard uses only named colours today.
+  { path = "ratatui::style::Color::Rgb", reason = "use a named ANSI colour, which respects the terminal theme" },
+  { path = "ratatui::style::Color::Indexed", reason = "use a named ANSI colour, which respects the terminal theme" },
+
   # `fs_err` is a dependency for one reason: its errors name the file they
   # failed on, which is most of what makes a config or session error useful.
   { path = "std::fs::read", reason = "use fs_err::read, so the error names the file" },

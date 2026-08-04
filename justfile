@@ -19,7 +19,7 @@ default:
 # Install everything the other recipes call.
 setup:
     cargo install cargo-binstall
-    cargo binstall --no-confirm cargo-shear typos-cli zizmor
+    cargo binstall --no-confirm cargo-shear cargo-deny typos-cli zizmor
     @echo "actionlint is not a crate — install it with: brew install actionlint"
 
 # Run every check CI runs, across all of its workflows.
@@ -48,6 +48,10 @@ unused:
 # Spell check code and prose alike.
 spell:
     typos
+
+# Check dependency licences, security advisories and sources.
+audit:
+    cargo deny check
 
 # Check the workflow files for syntax errors and security problems.
 workflows:

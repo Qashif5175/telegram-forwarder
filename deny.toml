@@ -1,0 +1,47 @@
+# Checks nobody performs by reading: 300-odd crates arrive with this binary,
+# and their licences and security advisories travel with them.
+#
+#   cargo deny check      (or: just audit)
+
+[advisories]
+# Anything with a known vulnerability or no maintainer is a failure, not a note.
+# Exceptions belong here with a reason and the condition for removing them, so a
+# stale one is visible rather than silently permanent.
+ignore = []
+
+[licenses]
+# Licences this binary may carry. Everything here was taken from the actual
+# dependency graph rather than copied from another project's list.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "0BSD",
+  "BSL-1.0",
+  "ISC",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+  # Weak, file-level copyleft: modifying an MPL file obliges publishing that
+  # file, which shipping one unmodified inside a binary does not. Reached
+  # through `directories` → `dirs-sys` → `option-ext`.
+  "MPL-2.0",
+]
+
+# `LGPL-2.1-or-later` is deliberately absent. It appears in the graph via
+# `r-efi`, which is triple-licensed `MIT OR Apache-2.0 OR LGPL-2.1-or-later`;
+# leaving LGPL out means one of the permissive options is taken instead.
+
+[bans]
+# Duplicates are normal in a graph this size and are the transitive crates'
+# business, not ours — worth seeing, not worth failing over.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+# Everything must come from crates.io. A git dependency is not inherently wrong,
+# but it is worth having to say so out loud.
+unknown-registry = "deny"
+unknown-git = "deny"
