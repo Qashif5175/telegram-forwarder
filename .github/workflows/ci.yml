@@ -36,6 +36,16 @@ jobs:
       - name: Spelling
         uses: crate-ci/typos@v1
 
+      # The workflows cannot check themselves: a mistyped `runs-on` label does
+      # not fail, it queues forever waiting for a runner that will never exist,
+      # and a workflow too broken to parse never runs at all. This catches both
+      # on the pull request instead. The upstream image bundles shellcheck, so
+      # every `run:` block is linted as shell as well.
+      - name: Workflow files
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
   lint:
     name: clippy
     runs-on: ubuntu-latest
