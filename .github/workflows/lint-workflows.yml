@@ -1,0 +1,51 @@
+name: Lint workflows
+
+# The workflows are the one part of the repository that cannot check itself. A
+# mistyped `runs-on` label does not fail a run — it queues forever waiting for a
+# runner that will never exist — and a workflow too malformed to parse never
+# executes at all, so the job that would have caught it never starts either.
+#
+# Two tools, one concern, so one workflow: actionlint covers syntax and lints
+# every `run:` block as shell, zizmor covers vulnerability patterns like
+# unpinned actions and template injection. `just workflows` runs the same pair.
+#
+# Their configuration lives beside this directory, in `.github/actionlint.yaml`
+# and `.github/zizmor.yml`.
+on:
+  push:
+    paths:
+      - .github/workflows/**
+      - .github/actionlint.yaml
+      - .github/zizmor.yml
+    branches: [main]
+  pull_request:
+    paths:
+      - .github/workflows/**
+      - .github/actionlint.yaml
+      - .github/zizmor.yml
+
+# Reads the workflow files; writes nothing back.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # From https://github.com/rhysd/actionlint/blob/main/docs/usage.md#use-actionlint-on-github-actions
+      # The image bundles shellcheck, so every `run:` block is linted as shell.
+      - name: Syntax
+        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: -color
+
+      # Findings fail the run directly rather than being uploaded to code
+      # scanning, which is why no extra permission is needed.
+      - name: Security
+        uses: zizmorcore/zizmor-action@6fc4b006235f201fdab3722e17240ab420d580e5 # v0.6.1
+        with:
+          advanced-security: false
