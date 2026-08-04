@@ -35,14 +35,12 @@ tokio = { version = "1", features = [
     "fs",
     "io-util",
 ] }
-futures = "0.3"
 
 # CLI surface.
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 clap_complete = "4"
 inquire = "0.9"
 ratatui = "0.30"
-owo-colors = "4"
 
 # Diagnostics.
 color-eyre = "0.6"
@@ -58,10 +56,8 @@ toml = "0.9"
 humantime-serde = "1"
 directories = "6"
 fs-err = "3"
-indexmap = { version = "2", features = ["serde"] }
 
 # Runtime plumbing.
-governor = "0.10"
 dashmap = "6"
 chrono = "0.4"
 rand = "0.9"
