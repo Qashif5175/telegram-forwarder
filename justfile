@@ -5,16 +5,22 @@
 # `cargo clippy --all-targets` did not fail on a warning while CI's did, so a
 # change could pass locally and break on push. One definition, one behaviour.
 #
-# Needs `just` plus the tools each recipe names:
-#
-#   brew install just typos-cli actionlint zizmor
-#   cargo install cargo-shear
-#
-# `cargo install` puts binaries in ~/.cargo/bin, which has to be on PATH.
+# Needs `just` itself, then `just setup` for everything the recipes call.
 
 # Show the available recipes.
 default:
     @just --list
+
+# `binstall` fetches prebuilt binaries; building these from source takes longer
+# than every check they then perform. Installs land in ~/.cargo/bin, which has
+# to be on PATH. `actionlint` is written in Go and is not on crates.io, so it
+# comes from elsewhere.
+#
+# Install everything the other recipes call.
+setup:
+    cargo install cargo-binstall
+    cargo binstall --no-confirm cargo-shear typos-cli zizmor
+    @echo "actionlint is not a crate — install it with: brew install actionlint"
 
 # Run every check CI runs, across all of its workflows.
 check: fmt lint test unused spell workflows

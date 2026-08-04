@@ -418,12 +418,11 @@ just check      # everything CI checks: format, lint, test, spelling, unused dep
 just fix        # rewrite formatting in place
 ```
 
-CI runs the same recipes, so a clean `just check` is a clean pipeline. Install
-the tools they use with:
+CI runs the same recipes, so a clean `just check` is a clean pipeline.
 
 ```sh
-brew install just typos-cli actionlint zizmor
-cargo install cargo-shear
+brew install just actionlint   # actionlint is Go, not a crate
+just setup                     # the rest, as prebuilt binaries
 ```
 
 CI also builds for release on Linux, macOS and Windows: the session file's
