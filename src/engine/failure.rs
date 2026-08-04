@@ -103,8 +103,7 @@ pub fn classify(error: &InvocationError) -> Disposition {
     let InvocationError::Rpc(rpc) = error else {
         return match error {
             // The connection was torn down, usually because we are shutting
-            // down. Nothing to retry against.
-            // Nothing to send it down, in any size.
+            // down. There is nothing left to retry against, in any size.
             InvocationError::Dropped => Disposition::Fatal(Fatal::destination("connection closed")),
             // Transport and IO faults are exactly what backoff is for.
             _ => Disposition::Backoff,
@@ -208,7 +207,11 @@ pub fn backoff_delay(attempt: u32) -> Duration {
     const BASE_MS: u64 = 400;
     const CEILING_MS: u64 = 30_000;
 
-    let exponential = BASE_MS.saturating_mul(1 << attempt.min(6));
+    // The clamp on the shift is only there to keep it inside `u64`; the ceiling
+    // is what actually bounds the wait. Clamping the shift at 6 instead, as this
+    // once did, capped the delay at 25.6s and left `CEILING_MS` describing a
+    // limit nothing could ever reach.
+    let exponential = BASE_MS.saturating_mul(1u64 << attempt.min(32));
     let capped = exponential.min(CEILING_MS);
     let jitter = rand::rng().random_range(0..=capped / 4);
 
@@ -349,5 +352,18 @@ mod tests {
         // The ceiling plus its maximum jitter.
         let capped = backoff_delay(20);
         assert!(capped <= Duration::from_millis(30_000 + 30_000 / 4));
+
+        // And it is reached, rather than being a limit the growth stops short
+        // of: without this, clamping the shift too low would silently cap the
+        // wait somewhere below the figure the constant claims.
+        assert!(capped >= Duration::from_secs(30));
+    }
+
+    #[test]
+    fn an_absurd_attempt_number_does_not_overflow_the_shift() {
+        // `max_attempts` is user-supplied, so nothing stops the counter from
+        // reaching a value that would panic on a shift in a debug build. Calling
+        // it at all is most of this test; the bound is the rest.
+        assert!(backoff_delay(u32::MAX) <= Duration::from_millis(30_000 + 30_000 / 4));
     }
 }

@@ -57,6 +57,13 @@ impl Payload {
     }
 
     /// The snapshot that carries the caption and drives logging.
+    ///
+    /// A payload always holds at least one snapshot, and the index says so
+    /// rather than papering over it with a fallback that could never run. Three
+    /// callers build one and every one of them is bounded: `dispatch` starts
+    /// from a non-empty slice, `deliver_separately` builds single-member
+    /// payloads, and the only reassignment inside `walk_ladder` comes from
+    /// `Outcome::Partial`, which is returned solely when something was refused.
     fn primary(&self) -> &Arc<Snapshot> {
         &self.snapshots[0]
     }
@@ -456,9 +463,8 @@ impl Dispatcher {
                 Strategy::Rehost => match self.send_rehost(payload, target_ref).await {
                     Ok(ids) => Ok(ids),
                     // A missing snapshot is not a Telegram failure, so it cannot
-                    // be classified; it simply ends the ladder.
-                    // No bytes anywhere in the payload; splitting it cannot
-                    // conjure any.
+                    // be classified; it simply ends the ladder. Splitting the
+                    // payload cannot conjure bytes that were never captured.
                     Err(RehostError::NoBytes) => {
                         return Outcome::Failed {
                             reason: "no snapshot available to re-upload".to_owned(),

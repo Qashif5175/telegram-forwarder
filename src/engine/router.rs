@@ -138,10 +138,26 @@ impl EchoGuard {
         }
     }
 
+    /// Take the lock, carrying on through a panic in another thread.
+    ///
+    /// Poisoning here would otherwise be catastrophic out of proportion to its
+    /// cause: every delivery consults this guard, so one panicking task would
+    /// turn every subsequent message into a panic of its own. What the lock
+    /// protects is a set and a queue mutated by nothing more complicated than
+    /// insert and pop, so there is no torn state to protect a reader from —
+    /// recovering the contents and continuing is strictly better than taking
+    /// the forwarder down with it.
+    fn lock(&self) -> std::sync::MutexGuard<'_, EchoGuardInner> {
+        self.inner.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("recovering the echo guard after a panic in another task");
+            poisoned.into_inner()
+        })
+    }
+
     /// Record a message we just produced in `chat_id`.
     pub fn remember(&self, chat_id: i64, message_id: i32) {
         let key = (chat_id, message_id);
-        let mut inner = self.inner.lock().expect("echo guard mutex poisoned");
+        let mut inner = self.lock();
 
         if inner.seen.insert(key) {
             inner.order.push_back(key);
@@ -155,11 +171,7 @@ impl EchoGuard {
 
     /// Whether this message is one we produced.
     pub fn is_own(&self, chat_id: i64, message_id: i32) -> bool {
-        self.inner
-            .lock()
-            .expect("echo guard mutex poisoned")
-            .seen
-            .contains(&(chat_id, message_id))
+        self.lock().seen.contains(&(chat_id, message_id))
     }
 }
 
