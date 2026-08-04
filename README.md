@@ -1,5 +1,9 @@
 # telegram-forwarder
 
+[![CI](https://github.com/awdr74100/telegram-forwarder/actions/workflows/ci.yml/badge.svg)](https://github.com/awdr74100/telegram-forwarder/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/awdr74100/telegram-forwarder?display_name=tag&sort=semver)](https://github.com/awdr74100/telegram-forwarder/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Mirror Telegram messages from any number of chats into any number of other chats
 — built for publishers who post and then delete seconds later.
 
@@ -202,8 +206,8 @@ tgfwd route disable   # switch one off without deleting it
 tgfwd route sync      # refresh the chat names stored in the config
 ```
 
-Run any of these with no arguments and you get a picker showing what each route
-*moves*, not its name:
+`edit`, `disable`, `enable` and `remove` take no arguments: they show a picker
+listing what each route *moves*, not what it is called.
 
 ```
 $ tgfwd route edit
@@ -313,9 +317,13 @@ to leave immediately.
 
 | Code | Meaning |
 |---|---|
-| `0` | stopped cleanly |
+| `0` | stopped cleanly, including after one `Ctrl+C` |
 | `1` | configuration or connection problem, explained on stderr |
-| `130` | interrupted, or a prompt was cancelled |
+| `130` | a second `Ctrl+C`, or a prompt cancelled with `Esc` |
+
+Note which side of that line `Ctrl+C` falls on: one press is a *request* to stop,
+it finishes what is in flight, and that is a clean exit. Only pressing it again —
+declining to wait — reports the interruption.
 
 Losing the connection to Telegram is an error, not a clean stop, so a supervisor
 will restart rather than assume all is well.
@@ -445,11 +453,13 @@ the one that is otherwise invisible until a delivery fails.
 
 ```sh
 just            # list the recipes
-just check      # everything CI checks: format, lint, test, spelling, unused deps, workflows
+just check      # everything CI checks, in one command
 just fix        # rewrite formatting in place
 ```
 
-CI runs the same recipes, so a clean `just check` is a clean pipeline.
+CI runs the same recipes, so a clean `just check` is a clean pipeline. It covers
+formatting, clippy, the tests, spelling, unused dependencies, the workflow files,
+and that the generated release workflow is still in step with its config.
 
 ```sh
 brew install just actionlint   # macOS; on Windows use `winget install --id Casey.Just`
@@ -491,8 +501,21 @@ be broken, and the Telegram API traps that cost the most to discover.
 
 ## Status
 
-Working, but young. Not yet done: CI, published binaries, and testing against a
-long network outage.
+Working, and young. Everything documented here is implemented and covered by
+tests; it has been run against a real account, including the case it exists for —
+a post deleted seconds after it appeared, delivered from the local snapshot.
+
+Known gaps, stated rather than discovered:
+
+- **A dead network is invisible for up to fifteen minutes.** Nothing is lost —
+  the missed messages are replayed once the link returns — but until the
+  underlying library gives up on its own, a silent connection and a quiet channel
+  look identical. Closing that needs a heartbeat, which is periodic traffic added
+  on purpose rather than a bug fix.
+- **Not on Homebrew, or anywhere but the GitHub Release.**
+- **Not tested against Telegram's rate limits at volume.** The pacing defaults
+  are a conservative guess, because Telegram does not publish the limits that
+  apply to user accounts.
 
 ## License
 

@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 Entries from 0.2.0 onwards are generated from the commit history by
 [git-cliff](https://git-cliff.org) — see `cliff.toml` and `just changelog`.
 
-## [0.1.0] - 2026-08-04
+## [0.1.0] - 2026-08-05
 
 First release.
 
@@ -34,6 +34,10 @@ it back.
   keywords, media kinds, captions and forwarded posts.
 - `tgfwd doctor` for checking a configuration, including whether every
   configured chat is still reachable.
+- Both files this tool writes are created readable by their owner alone, with
+  the permissions applied at creation rather than tightened afterwards. The
+  session file is a live login to the account; the configuration holds the API
+  credentials.
 - Prebuilt binaries and installer scripts for macOS, Linux and Windows.
 
 [0.1.0]: https://github.com/awdr74100/telegram-forwarder/releases/tag/v0.1.0

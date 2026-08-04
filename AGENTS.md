@@ -27,11 +27,11 @@ later**. Everything below follows from that.
    own dialog list (`telegram/dialogs.rs`). A mistyped ID fails silently at
    delivery time, which is the worst possible moment.
 
-5. **Identifiers are for machines, not people.** A route's `id` exists so logs,
-   and shell scripts can name one. It is derived from the source
-   chat by `auto_id`; the user is never asked to invent or recall it. Anywhere a
-   route is offered for selection, show `describe_route` — what it moves — not
-   the id. Do not add a prompt that asks the user to name something, and never
+5. **Identifiers are for machines, not people.** A route's `id` exists so logs
+   and shell scripts can name one. It is derived from the source chat by
+   `auto_id`; the user is never asked to invent or recall it. Anywhere a route is
+   offered for selection, show `describe_route` — what it moves — not the id. Do
+   not add a prompt that asks the user to name something, and never
    ask anyone to type a value that already exists in the config or on Telegram:
    chat titles are full of emoji and symbols that cannot be typed from memory.
 
@@ -39,11 +39,18 @@ later**. Everything below follows from that.
 
 ```
 main.rs → cli.rs → commands/ → engine/
-                             → telegram/  (all Telegram I/O)
-                             → config/    (schema, validation)
-                             → session.rs (single-file Session impl)
-                             → ui/        (theme, prompts, logger)
+                             → telegram/       (all Telegram I/O)
+                             → config/         (schema, validation)
+                             → session.rs      (single-file Session impl)
+                             → private_file.rs (owner-only writes)
+                             → ui/             (theme, prompts, logger)
 ```
+
+`private_file.rs` exists so the two files this tool persists get the same answer.
+Both hold something other users of the machine should not read — the session file
+*is* a login to the account, the configuration holds `api_hash` — and having the
+session be careful while the configuration inherited the umask was a difference
+with no reason behind it.
 
 `telegram/` never depends on `cli/`, `config/` or `ui/`. The login flow asks
 questions through the `LoginPrompt` trait so it carries no terminal dependency.
@@ -160,16 +167,22 @@ anybody touching the repository.
 The tools they need are `just`, `typos`, `actionlint`, `zizmor` and
 `cargo-shear`; the header of the `justfile` lists how to install them.
 
-CI runs exactly these on every push and pull request, with warnings promoted to
-errors and `--locked` so a dependency bumped without committing `Cargo.lock`
-fails there rather than drifting. The linting runs once, on Linux; the tests run
-on Linux, macOS **and** Windows, because the session file's permissions, the
-config directory layout and the editor `config edit` reaches for all differ
-there, and compiling proves none of them still work.
+CI runs these on every push and pull request, with warnings promoted to errors
+and `--locked` so a dependency bumped without committing `Cargo.lock` fails there
+rather than drifting. The linting runs once, on Linux; the tests run on Linux,
+macOS **and** Windows, because the session file's permissions, the config
+directory layout and the editor `config edit` reaches for all differ there, and
+compiling proves none of them still work.
+
+`workflows`, `audit` and `release-check` are path-filtered into workflows of
+their own rather than run on every push: each needs a tool the main job does not,
+and each guards files that change rarely. `just check` runs the lot, which is why
+it is the one command worth running before pushing.
 
 The recipes put the cargo bin directory on `PATH` themselves and choose the
-separator by platform, so a Windows checkout needs nothing added to a profile. There is no `cargo test --doc` step: this crate
-has no library target, and that command errors out rather than finding nothing.
+separator by platform, so a Windows checkout needs nothing added to a profile.
+There is no `cargo test --doc` step: this crate has no library target, and that
+command errors out rather than finding nothing.
 
 Exceptions to clippy's pedantic set live in `Cargo.toml` under `[lints.clippy]`,
 each with a written justification. Add to that list only with a reason.
@@ -227,7 +240,9 @@ described repairs to code that no release had ever carried.
 `.github/workflows/release.yml` is **generated** from `dist-workspace.toml` and
 committed, so the pipeline keeps working whatever happens to the tool. Never
 edit it by hand: change the config and run `just release-check`, which
-regenerates it and fails if it was left stale.
+regenerates it and fails if it was left stale. Forgetting is caught anyway —
+`lint-workflows.yml` runs the same check whenever either file changes, and reads
+the `dist` version out of `dist-workspace.toml` rather than repeating it.
 
 That file is also the one place the repository's own standards are relaxed. It
 is generated code holding write access to releases, so the exemptions in

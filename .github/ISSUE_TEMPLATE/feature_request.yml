@@ -1,0 +1,33 @@
+name: Feature request
+description: Something the tool should do and does not.
+labels: [enhancement]
+
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        The situation, not the solution. What this tool does today and where
+        that leaves you is more useful than a description of the feature, because
+        it often turns out there is already a way — or a better one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Optional. A sketch of the flag, setting or flow you pictured.
+
+  - type: markdown
+    attributes:
+      value: |
+        Worth knowing before you write: [AGENTS.md](https://github.com/awdr74100/telegram-forwarder/blob/main/AGENTS.md) lists
+        the design rules this project will not break, and the reasoning behind
+        them. Two that come up often —
+
+        - **Nobody types a chat ID.** Everything selectable comes from the
+          account's own dialog list.
+        - **Capture happens before any decision.** Nothing may be moved ahead of
+          it, because that is what makes a deleted post survivable.
