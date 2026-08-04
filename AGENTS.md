@@ -159,8 +159,32 @@ cargo run -- --help
 Exceptions to clippy's pedantic set live in `Cargo.toml` under `[lints.clippy]`,
 each with a written justification. Add to that list only with a reason.
 
+## What happens when the network drops
+
+Traced rather than assumed, because the behaviour is not what it looks like from
+here and the obvious test — pull the network and watch — appears to show nothing
+working.
+
+Dropping the link does not fail the socket. Nothing is being sent and nothing is
+expected, so the connection simply goes quiet. `grammers` builds connections on
+demand and drops failed ones from its pool, which means a brief outage is
+absorbed silently and deliberately: a hiccup should not kill the process.
+
+The recovery is driven by `NO_UPDATES_TIMEOUT`, fifteen minutes in
+`grammers-session`. After that long without an update the message box asks for a
+difference, that request fails while offline — the default retry policy gives up
+after one attempt on an I/O error — and the error surfaces through
+`UpdateStream::next`, ending the run with a non-zero exit for a supervisor to act
+on. Once the link returns, the same difference mechanism replays what was missed,
+so an outage costs latency rather than messages, except for anything deleted
+while it lasted.
+
+The gap this leaves is observability, not correctness: for up to fifteen minutes
+a dead link is indistinguishable from a quiet channel, and the dashboard shows
+nothing amiss. Closing that would take an active heartbeat, which is a deliberate
+addition of periodic traffic rather than a bug fix.
+
 ## Not done yet
 
 CI, release packaging, and publishing to crates.io are deliberately out of scope
-so far. Reconnection on network loss relies on `grammers`' own retry policy and
-has not been tested against a long outage.
+so far.
