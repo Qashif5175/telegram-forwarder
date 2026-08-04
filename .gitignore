@@ -5,12 +5,23 @@
 # scripts. It is never part of the published project.
 .local/
 
-# Runtime state that must never be committed. The session file is a live
-# credential: anyone holding it is logged into the account.
+# Runtime state that must never be committed.
+#
+# The session file is a live credential: anyone holding it is logged into the
+# account. `TGFWD_HOME=. tgfwd login` — or any variant of it while testing —
+# writes the whole profile into the working directory, so the names matched here
+# are the ones `Paths::from_root` actually produces: `config.toml` at the root,
+# `data/session.json`, and a `cache/` of snapshotted media.
+#
+# Matching the real names matters more than it looks. An earlier version of this
+# file listed `*.session.json`, which matches `something.session.json` and not
+# the `session.json` this tool writes — so the one file that must never be
+# committed was the one file not covered.
+session.json
 *.session
-*.session.json
 /config.toml
-/media-cache/
+/data/
+/cache/
 
 # macOS
 .DS_Store
