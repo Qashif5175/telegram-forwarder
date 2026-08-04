@@ -42,7 +42,13 @@ setup:
     @echo "actionlint is not a crate. See https://github.com/rhysd/actionlint/releases"
 
 # Run every check CI runs, across all of its workflows.
-check: fmt lint test unused spell workflows release-check
+#
+# `audit` belongs here despite being the slow one. It was left out at first, on
+# the reasoning that CI runs it weekly anyway — and a licence allowance went
+# stale for several commits without anything local saying so, because dropping a
+# dependency removed the only crate that used it. A list of checks that is almost
+# everything CI runs is worth less than it looks.
+check: fmt lint test unused spell workflows release-check audit
 
 # Verify formatting without rewriting anything.
 fmt:

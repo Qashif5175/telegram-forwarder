@@ -17,12 +17,14 @@ on:
       - .github/workflows/**
       - .github/actionlint.yaml
       - .github/zizmor.yml
+      - dist-workspace.toml
     branches: [main]
   pull_request:
     paths:
       - .github/workflows/**
       - .github/actionlint.yaml
       - .github/zizmor.yml
+      - dist-workspace.toml
 
 # Reads the workflow files; writes nothing back.
 permissions:
@@ -49,3 +51,32 @@ jobs:
         uses: zizmorcore/zizmor-action@6fc4b006235f201fdab3722e17240ab420d580e5 # v0.6.1
         with:
           advanced-security: false
+
+  # `release.yml` is generated from `dist-workspace.toml` and committed. Editing
+  # the config without regenerating leaves the two describing different releases,
+  # and nothing would say so until a tag was pushed and built the wrong thing.
+  #
+  # Its own job because it needs a toolchain the linting above does not, and this
+  # whole workflow is path-filtered, so neither runs on an ordinary change.
+  generated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        with:
+          tool: just,cargo-binstall
+
+      # `dist generate --check` compares against what one exact version emits, so
+      # a newer one here would report the committed workflow as stale. The
+      # version is read from the config rather than written out again: it is
+      # already stated there, and a copy is a copy that can drift.
+      - name: Install the pinned dist
+        run: |
+          version=$(grep -m1 '^cargo-dist-version' dist-workspace.toml | cut -d'"' -f2)
+          echo "dist-workspace.toml asks for dist $version"
+          cargo binstall --no-confirm "cargo-dist@$version"
+
+      - run: just release-check
