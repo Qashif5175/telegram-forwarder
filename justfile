@@ -35,6 +35,10 @@ default:
 setup:
     cargo install cargo-binstall
     cargo binstall --no-confirm cargo-shear cargo-deny git-cliff typos-cli zizmor
+    # Pinned: `dist generate --check` compares against what one specific version
+    # emits, so a newer one here reports the committed workflow as stale. Keep
+    # this equal to `cargo-dist-version` in dist-workspace.toml.
+    cargo binstall --no-confirm cargo-dist@0.32.0
     @echo "actionlint is not a crate. See https://github.com/rhysd/actionlint/releases"
 
 # Run every check CI runs, across all of its workflows.
