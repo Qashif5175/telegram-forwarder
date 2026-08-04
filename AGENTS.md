@@ -150,15 +150,18 @@ under one root, which is what the tests and multi-account setups use.
 ## Commands
 
 ```sh
-cargo test                    # 120 tests, all offline
-cargo clippy --all-targets    # must be clean; pedantic is on
-cargo fmt
-cargo shear                   # unused dependencies; cargo install cargo-shear
-typos                         # spelling; cargo install typos-cli
-actionlint                    # workflow syntax; brew install actionlint
-zizmor .github/workflows/     # workflow security; brew install zizmor
-cargo run -- --help
+just            # list the recipes
+just check      # everything CI checks
+just fix        # rewrite formatting
 ```
+
+CI runs these same recipes rather than its own copy of the commands, so what
+passes locally is what passes on push. Before the `justfile` existed the two had
+already drifted: the documented lint did not fail on a warning while CI's did.
+
+Individually: `just fmt`, `lint`, `test`, `unused`, `spell`, `workflows`, `build`.
+The tools they need are `just`, `typos`, `actionlint`, `zizmor` and
+`cargo-shear`; the header of the `justfile` lists how to install them.
 
 CI runs exactly these on every push and pull request, with warnings promoted to
 errors and `--locked` so a dependency bumped without committing `Cargo.lock`

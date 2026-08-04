@@ -413,19 +413,22 @@ the one that is otherwise invisible until a delivery fails.
 ## Development
 
 ```sh
-cargo test                    # 120 tests, all offline — no network, no account
-cargo clippy --all-targets    # must be clean; pedantic lints are on
-cargo fmt                     # or `cargo fmt --check` to verify without writing
-cargo shear                   # unused dependencies; cargo install cargo-shear
-typos                         # spell check; cargo install typos-cli
-actionlint                    # workflow syntax; brew install actionlint
-zizmor .github/workflows/     # workflow security; brew install zizmor
+just            # list the recipes
+just check      # everything CI checks: format, lint, test, spelling, unused deps, workflows
+just fix        # rewrite formatting in place
 ```
 
-Every one of these runs in CI on each push and pull request, along with a release
-build on Linux, macOS and Windows — the session file's permissions and the config
-directory layout both differ on Windows, and building on Linux alone would never
-exercise either.
+CI runs the same recipes, so a clean `just check` is a clean pipeline. Install
+the tools they use with:
+
+```sh
+brew install just typos-cli actionlint zizmor
+cargo install cargo-shear
+```
+
+CI also builds for release on Linux, macOS and Windows: the session file's
+permissions and the config directory layout both differ on Windows, and building
+on Linux alone would exercise neither.
 
 The toolchain is pinned in `rust-toolchain.toml`, so `rustup` installs the right
 version automatically on first build — there is no setup step. Clippy runs with

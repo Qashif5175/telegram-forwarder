@@ -23,6 +23,10 @@ jobs:
   # the same compilation, so splitting them across jobs would pay for it again
   # each time. Ordered cheapest first, so a formatting slip fails before
   # anything is built.
+  #
+  # The steps call `just`, which is also what a developer runs locally. Keeping
+  # a second copy of the commands here is how the two drifted apart before:
+  # the documented lint did not fail on a warning while this one did.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -38,28 +42,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
-      - name: Format
-        run: cargo fmt --all --check
+      # Prebuilt binaries. Building cargo-shear from source took longer than
+      # every check it performs.
+      - uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        with:
+          tool: just,cargo-shear,typos
 
-      - uses: crate-ci/typos@8a48f81b6c64dcfea44b3633223084c4be58ac5f # v1.49.0
-
-      # Pedantic is enabled in Cargo.toml; warnings are failures here even
-      # though they are not locally, so nothing lands half-tidied.
-      - name: Lint
-        run: cargo clippy --all-targets --locked -- -D warnings
-
-      # `--locked` doubles as a lock file check: a dependency bumped without
-      # committing Cargo.lock fails here rather than drifting. No `--doc` run to
-      # accompany it, because `cargo test --doc` errors outright on a crate with
-      # no library target, which this binary has not got.
-      - name: Test
-        run: cargo test --all-targets --locked
-
-      # Four unused dependencies had already accumulated before this was added,
-      # including a rate limiter replaced by hand-written code long ago. The
-      # compiler cannot see those, so something else has to look.
-      - name: Unused dependencies
-        run: cargo install cargo-shear --locked && cargo shear
+      - run: just fmt
+      - run: just lint
+      - run: just test
+      - run: just unused
+      - run: just spell
 
   # Separate because it is the platforms that are being tested, not the checks:
   # the session file's permissions and the config directory layout both differ
@@ -80,5 +73,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
-      - name: Build
-        run: cargo build --release --locked
+      - uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        with:
+          tool: just
+
+      - run: just build
