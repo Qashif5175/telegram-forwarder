@@ -25,17 +25,23 @@
     "editor.formatOnSave": false
   },
 
-  // `taplo`, through the extension that embeds it. The rules it follows are in
-  // `.taplo.toml` rather than here, so the same formatting applies to anyone
-  // running `taplo` directly and does not depend on per-editor defaults.
+  // `taplo`, which the extension bundles — nothing has to be installed
+  // separately for this to work.
   "[toml]": {
     "editor.defaultFormatter": "tamasfe.even-better-toml",
     "editor.formatOnSave": true
   },
 
-  // Key and array order carries meaning in `deny.toml` and `dist-workspace.toml`
-  // — see `.taplo.toml`. This extension can reorder independently of the rules
-  // in that file, so it is turned off here as well.
+  // Key and array order carries meaning here, so the two settings that would
+  // destroy it stay off. `deny.toml` groups licences by how permissive they are
+  // and `dist-workspace.toml` lists targets in the order they read; sorting
+  // either alphabetically would leave the comments beside them describing an
+  // order that is no longer there.
   "evenBetterToml.formatter.reorderKeys": false,
-  "evenBetterToml.formatter.reorderArrays": false
+  "evenBetterToml.formatter.reorderArrays": false,
+
+  // 100 rather than the default 80, at which `grammers-session` — one dependency
+  // with one feature — is split across three lines, longer than the line it
+  // replaces and no clearer.
+  "evenBetterToml.formatter.columnWidth": 100
 }
