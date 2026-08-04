@@ -1,12 +1,10 @@
-//! Live counters and a recent-event feed.
+//! Per-route counters, summarised when the run ends.
 //!
-//! Both the log output and the dashboard read from here, so the numbers a user
-//! sees are the same numbers in both views.
+//! Deliveries are announced as they happen by the log output; these are the
+//! aggregates, which is the part a scrolling log cannot show. They are read once,
+//! on the way out.
 
-use std::collections::VecDeque;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 
@@ -31,30 +29,6 @@ impl Strategy {
     }
 }
 
-/// How many latency samples to keep per route for the rolling average.
-const LATENCY_WINDOW: usize = 64;
-
-/// How many recent events the dashboard can show.
-const EVENT_BUFFER: usize = 256;
-
-/// One line in the recent-activity feed.
-#[derive(Debug, Clone)]
-pub struct Event {
-    pub at: chrono::DateTime<chrono::Local>,
-    pub route: String,
-    pub outcome: Outcome,
-    pub detail: String,
-}
-
-/// The result of one delivery attempt, as shown in the feed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Outcome {
-    Delivered,
-    Rescued,
-    Failed,
-    Filtered,
-}
-
 /// Per-route counters.
 #[derive(Debug, Default)]
 struct RouteCounters {
@@ -66,7 +40,6 @@ struct RouteCounters {
     by_forward: AtomicU64,
     by_copy: AtomicU64,
     by_rehost: AtomicU64,
-    latencies: Mutex<VecDeque<Duration>>,
 }
 
 /// A point-in-time copy of one route's numbers.
@@ -80,21 +53,12 @@ pub struct RouteSnapshot {
     pub by_forward: u64,
     pub by_copy: u64,
     pub by_rehost: u64,
-    /// Mean of the recent latency window.
-    pub average_latency: Option<Duration>,
-    /// Slowest delivery in the recent window.
-    pub worst_latency: Option<Duration>,
 }
 
-/// Everything the dashboard needs to render one frame.
+/// Every route's numbers, taken together.
 #[derive(Debug, Clone)]
 pub struct Snapshot {
-    pub uptime: Duration,
     pub routes: Vec<RouteSnapshot>,
-    pub events: Vec<Event>,
-    pub in_flight: u64,
-    /// Deliveries currently sleeping on a server-issued wait.
-    pub waiting: u64,
 }
 
 impl Snapshot {
@@ -120,44 +84,21 @@ impl Snapshot {
 }
 
 /// Shared, lock-light statistics.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Stats {
-    started: Instant,
     routes: DashMap<String, RouteCounters>,
-    events: Mutex<VecDeque<Event>>,
-    in_flight: AtomicU64,
-    waiting: AtomicU64,
-}
-
-impl Default for Stats {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl Stats {
     pub fn new() -> Self {
-        Self {
-            started: Instant::now(),
-            routes: DashMap::new(),
-            events: Mutex::new(VecDeque::with_capacity(EVENT_BUFFER)),
-            in_flight: AtomicU64::new(0),
-            waiting: AtomicU64::new(0),
-        }
+        Self::default()
     }
 
     /// Record a successful delivery.
     ///
     /// `rescued` marks deliveries that would have been lost without the snapshot,
     /// which is the number that justifies the whole design.
-    pub fn delivered(
-        &self,
-        route: &str,
-        strategy: Strategy,
-        latency: Duration,
-        rescued: bool,
-        detail: impl Into<String>,
-    ) {
+    pub fn delivered(&self, route: &str, strategy: Strategy, rescued: bool) {
         let entry = self.route(route);
         entry.delivered.fetch_add(1, Ordering::Relaxed);
         match strategy {
@@ -168,51 +109,23 @@ impl Stats {
         if rescued {
             entry.rescued.fetch_add(1, Ordering::Relaxed);
         }
-
-        if let Ok(mut window) = entry.latencies.lock() {
-            window.push_back(latency);
-            while window.len() > LATENCY_WINDOW {
-                window.pop_front();
-            }
-        }
-        drop(entry);
-
-        self.push_event(
-            route,
-            if rescued {
-                Outcome::Rescued
-            } else {
-                Outcome::Delivered
-            },
-            detail,
-        );
     }
 
     /// Record a delivery that could not be completed.
-    pub fn failed(&self, route: &str, detail: impl Into<String>) {
+    pub fn failed(&self, route: &str) {
         self.route(route).failed.fetch_add(1, Ordering::Relaxed);
-        self.push_event(route, Outcome::Failed, detail);
     }
 
     /// Record a message dropped by a filter.
-    pub fn filtered(&self, route: &str, detail: impl Into<String>) {
+    pub fn filtered(&self, route: &str) {
         self.route(route).filtered.fetch_add(1, Ordering::Relaxed);
-        self.push_event(route, Outcome::Filtered, detail);
     }
 
-    /// Track a delivery entering flight; the returned guard decrements on drop.
-    pub fn begin_delivery(&self) -> InFlightGuard<'_> {
-        self.in_flight.fetch_add(1, Ordering::Relaxed);
-        InFlightGuard { stats: self }
-    }
-
-    /// Track a delivery sleeping on a flood wait.
-    pub fn begin_wait(&self) -> WaitGuard<'_> {
-        self.waiting.fetch_add(1, Ordering::Relaxed);
-        WaitGuard { stats: self }
-    }
-
-    /// Make sure a route shows up in the dashboard before it has any traffic.
+    /// Make sure a route appears in the summary even with no traffic.
+    ///
+    /// A route that moved nothing and a route that was never configured look the
+    /// same in a report built only from what happened, and those have completely
+    /// different causes.
     pub fn register_route(&self, route: &str) {
         self.route(route);
     }
@@ -224,44 +137,13 @@ impl Stats {
         self.routes.get(route).expect("just inserted")
     }
 
-    fn push_event(&self, route: &str, outcome: Outcome, detail: impl Into<String>) {
-        let Ok(mut events) = self.events.lock() else {
-            return;
-        };
-
-        events.push_back(Event {
-            at: chrono::Local::now(),
-            route: route.to_owned(),
-            outcome,
-            detail: detail.into(),
-        });
-
-        while events.len() > EVENT_BUFFER {
-            events.pop_front();
-        }
-    }
-
-    /// Copy the current numbers for rendering.
+    /// Copy the current numbers for reporting.
     pub fn snapshot(&self) -> Snapshot {
         let mut routes: Vec<RouteSnapshot> = self
             .routes
             .iter()
             .map(|entry| {
                 let counters = entry.value();
-                let window = counters.latencies.lock().ok();
-
-                let (average, worst) = window.as_ref().map_or((None, None), |window| {
-                    if window.is_empty() {
-                        (None, None)
-                    } else {
-                        let sum: Duration = window.iter().sum();
-                        (
-                            Some(sum / u32::try_from(window.len()).unwrap_or(1)),
-                            window.iter().max().copied(),
-                        )
-                    }
-                });
-
                 RouteSnapshot {
                     route: entry.key().clone(),
                     delivered: counters.delivered.load(Ordering::Relaxed),
@@ -271,51 +153,12 @@ impl Stats {
                     by_forward: counters.by_forward.load(Ordering::Relaxed),
                     by_copy: counters.by_copy.load(Ordering::Relaxed),
                     by_rehost: counters.by_rehost.load(Ordering::Relaxed),
-                    average_latency: average,
-                    worst_latency: worst,
                 }
             })
             .collect();
 
         routes.sort_by(|a, b| a.route.cmp(&b.route));
-
-        let events = self
-            .events
-            .lock()
-            .map(|events| events.iter().cloned().collect())
-            .unwrap_or_default();
-
-        Snapshot {
-            uptime: self.started.elapsed(),
-            routes,
-            events,
-            in_flight: self.in_flight.load(Ordering::Relaxed),
-            waiting: self.waiting.load(Ordering::Relaxed),
-        }
-    }
-}
-
-/// Decrements the in-flight counter when dropped.
-#[derive(Debug)]
-pub struct InFlightGuard<'a> {
-    stats: &'a Stats,
-}
-
-impl Drop for InFlightGuard<'_> {
-    fn drop(&mut self) {
-        self.stats.in_flight.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
-/// Decrements the waiting counter when dropped.
-#[derive(Debug)]
-pub struct WaitGuard<'a> {
-    stats: &'a Stats,
-}
-
-impl Drop for WaitGuard<'_> {
-    fn drop(&mut self) {
-        self.stats.waiting.fetch_sub(1, Ordering::Relaxed);
+        Snapshot { routes }
     }
 }
 
@@ -326,15 +169,9 @@ mod tests {
     #[test]
     fn counters_accumulate_per_route() {
         let stats = Stats::new();
-        stats.delivered(
-            "a",
-            Strategy::Forward,
-            Duration::from_millis(100),
-            false,
-            "x",
-        );
-        stats.delivered("a", Strategy::Copy, Duration::from_millis(300), true, "y");
-        stats.failed("b", "nope");
+        stats.delivered("a", Strategy::Forward, false);
+        stats.delivered("a", Strategy::Copy, true);
+        stats.failed("b");
 
         let snapshot = stats.snapshot();
         let a = snapshot.routes.iter().find(|r| r.route == "a").unwrap();
@@ -343,8 +180,6 @@ mod tests {
         assert_eq!(a.rescued, 1);
         assert_eq!(a.by_forward, 1);
         assert_eq!(a.by_copy, 1);
-        assert_eq!(a.average_latency, Some(Duration::from_millis(200)));
-        assert_eq!(a.worst_latency, Some(Duration::from_millis(300)));
 
         let b = snapshot.routes.iter().find(|r| r.route == "b").unwrap();
         assert_eq!(b.failed, 1);
@@ -353,37 +188,13 @@ mod tests {
     #[test]
     fn totals_add_up_across_routes() {
         let stats = Stats::new();
-        stats.delivered("a", Strategy::Forward, Duration::from_millis(10), false, "");
-        stats.delivered("b", Strategy::Rehost, Duration::from_millis(10), true, "");
+        stats.delivered("a", Strategy::Forward, false);
+        stats.delivered("b", Strategy::Rehost, true);
 
         let totals = stats.snapshot().totals();
         assert_eq!(totals.delivered, 2);
         assert_eq!(totals.rescued, 1);
         assert_eq!(totals.by_rehost, 1);
-    }
-
-    #[test]
-    fn in_flight_returns_to_zero_when_guards_drop() {
-        let stats = Stats::new();
-        {
-            let _one = stats.begin_delivery();
-            let _two = stats.begin_delivery();
-            assert_eq!(stats.snapshot().in_flight, 2);
-        }
-        assert_eq!(stats.snapshot().in_flight, 0);
-    }
-
-    #[test]
-    fn the_event_feed_is_bounded() {
-        let stats = Stats::new();
-        for i in 0..(EVENT_BUFFER + 50) {
-            stats.failed("a", format!("event {i}"));
-        }
-
-        let snapshot = stats.snapshot();
-        assert_eq!(snapshot.events.len(), EVENT_BUFFER);
-        // The oldest entries are the ones dropped.
-        assert!(snapshot.events[0].detail.contains("event 50"));
     }
 
     #[test]

@@ -72,7 +72,7 @@ async fn dispatch(cli: Cli) -> Result<()> {
             commands::completions(shell);
             Ok(())
         }
-        Command::Start { tui, catch_up } => commands::start::run(&paths, tui, catch_up).await,
+        Command::Start { catch_up } => commands::start::run(&paths, catch_up).await,
         Command::Route { action } => match action {
             RouteCommand::Add => commands::route::add(&paths).await,
             RouteCommand::List => commands::route::list(&paths),

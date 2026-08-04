@@ -32,10 +32,6 @@ pub enum Command {
 
     /// Start forwarding.
     Start {
-        /// Show the live dashboard instead of scrolling logs.
-        #[arg(long)]
-        tui: bool,
-
         /// Also process messages that arrived while this tool was not running.
         #[arg(long)]
         catch_up: bool,

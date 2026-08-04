@@ -192,7 +192,7 @@ deliver and what to filter. Sources and targets are both lists, so one route can
 fan several channels into several destinations.
 
 Each route gets a short name generated from its first source chat. You are never
-asked to invent one; it exists only so logs, the dashboard and shell scripts have
+asked to invent one; it exists only so logs and shell scripts have
 something stable to refer to.
 
 ```sh
@@ -289,15 +289,21 @@ this.
 ## Running it
 
 ```sh
-tgfwd start              # colourful log lines
-tgfwd start --tui        # full-screen dashboard
+tgfwd start              # forward until interrupted
 tgfwd start --catch-up   # also process messages that arrived while it was stopped
 ```
 
-The dashboard shows per-route throughput, how many messages were rescued, what is
-in flight, what is sitting out a rate limit, and a live event feed. Log output is
-held back while it is open and replayed when you quit, so nothing is lost and
-nothing paints over the display.
+Every delivery is announced as it happens, including the ones that went fine —
+silence would read exactly like a tool that is quietly broken:
+
+```
+12:04:31 ✔ delivered to Tech News   route=mirror via=forward took=812ms what=市場快訊…
+12:04:33 ✔ rescued into Tech News   route=mirror via=copy    took=1.2s  what=photo message
+```
+
+`via` is the rung of the ladder that did the work, and *rescued* means the source
+was already gone by the time it was delivered. On exit you get the totals, the
+same numbers broken down per route, and how many rungs below the top were needed.
 
 **Stopping.** `Ctrl+C` finishes in-flight deliveries first, which can take a
 moment if one is waiting out a server-issued rate limit. Press it a second time
@@ -389,9 +395,9 @@ and fails outright once the wait exceeds `max_flood_wait`.
 The default is a conservative guess, not a derived figure — Telegram does not
 publish the limits that apply to user accounts, and the numbers usually quoted
 are the Bot API's, which do not. So tune it by observation rather than by
-arithmetic: **the `waiting` counter on the dashboard is the signal.** If it sits
-above zero, the interval is too short for your traffic. Setting it to `0`
-disables pacing altogether.
+arithmetic: **`waiting out a rate limit` in the log is the signal.** If it appears
+at all, the interval is too short for your traffic. Setting it to `0` disables
+pacing altogether.
 
 ## Loop protection
 

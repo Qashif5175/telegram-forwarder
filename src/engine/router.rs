@@ -97,7 +97,7 @@ impl Router {
     /// Every route that survived into the table, once each.
     ///
     /// Not the same as the enabled routes in the config: one whose every target
-    /// is also its own source is dropped above, and listing it in the dashboard
+    /// is also its own source is dropped above, and reporting on it afterwards
     /// would show a row that can never move.
     pub fn routes(&self) -> BTreeSet<&str> {
         self.table
@@ -262,8 +262,8 @@ mod tests {
 
     #[test]
     fn only_routes_that_can_move_something_are_listed() {
-        // The dashboard registers these, and a row that can never move is worse
-        // than no row: it reads as a route that is silently failing.
+        // These are what get registered for the summary, and a line that can
+        // never move is worse than no line: it reads as a route silently failing.
         let router = Router::build(&config_with(vec![
             route("live", &[-1001], &[-2001]),
             route("self", &[-3001], &[-3001]),

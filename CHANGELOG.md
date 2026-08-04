@@ -26,8 +26,8 @@ it back.
 - Albums are held briefly, ordered by message id and delivered as one post. If
   the group is refused as a group, its parts are delivered individually rather
   than lost.
-- A live dashboard (`--tui`) showing throughput, rescues, what is in flight and
-  what is waiting out a rate limit.
+- Every delivery is announced as it happens, saying which rung of the ladder
+  carried it and how long it took, with per-route totals reported on exit.
 - Interactive route management, with every chat chosen from the account's own
   dialog list. No chat ID is ever typed.
 - Per-target pacing, a configurable album window, and content filters on

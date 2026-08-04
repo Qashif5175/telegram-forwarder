@@ -7,19 +7,11 @@ use color_eyre::eyre::{Result, bail};
 use crate::config::{Config, Paths};
 use crate::engine::Engine;
 use crate::ui::theme::{self, Level};
-use crate::ui::tui;
 
 use super::say;
 
 /// Start forwarding until interrupted.
-pub async fn run(paths: &Paths, use_tui: bool, catch_up: bool) -> Result<()> {
-    // Asked before anything expensive: signing in is the most rate-limited thing
-    // this tool does, and "there is nowhere to draw the dashboard" is knowable
-    // without contacting Telegram at all.
-    if use_tui {
-        tui::ensure_drawable()?;
-    }
-
+pub async fn run(paths: &Paths, catch_up: bool) -> Result<()> {
     let config = super::load_config_with_credentials(paths).await?;
     config.validate()?;
 
@@ -68,32 +60,12 @@ pub async fn run(paths: &Paths, use_tui: bool, catch_up: bool) -> Result<()> {
         }
     };
 
-    if use_tui {
-        // The dashboard owns the terminal, so the engine runs beside it. Each
-        // side signals the shared flag when it stops, so neither can be left
-        // waiting on the other: `tui::run` always sets it on the way out, and
-        // the engine sets it here.
-        let engine_task = {
-            let shutdown_tx = shutdown_tx.clone();
-            tokio::spawn(async move {
-                let result = engine.run(updates, engine_shutdown).await;
-                let _ = shutdown_tx.send(true);
-                result
-            })
-        };
+    let result = engine.run(updates, engine_shutdown).await;
 
-        let tui_result = tui::run(Arc::clone(&stats), shutdown_rx, shutdown_tx).await;
-        let engine_result = engine_task.await?;
-
-        // Reported before either result is propagated: the numbers are worth
-        // seeing whether or not the run ended cleanly.
-        report_totals(&stats);
-        tui_result?;
-        engine_result?;
-    } else {
-        engine.run(updates, engine_shutdown).await?;
-        report_totals(&stats);
-    }
+    // Reported before the result is propagated: the numbers are worth seeing
+    // whether or not the run ended cleanly.
+    report_totals(&stats);
+    result?;
 
     say(Level::Info, "shutting down…");
     connection.shutdown().await
@@ -142,6 +114,10 @@ fn announce(config: &Config, sources: usize) {
 }
 
 /// Summarise the session on exit.
+///
+/// This is the only place aggregates are shown. A scrolling log announces each
+/// delivery as it happens but cannot answer "how did the run go", and for a tool
+/// left running unattended that question is asked at the end.
 fn report_totals(stats: &crate::engine::stats::Stats) {
     let snapshot = stats.snapshot();
     let totals = snapshot.totals();
@@ -154,6 +130,33 @@ fn report_totals(stats: &crate::engine::stats::Stats) {
             totals.delivered, totals.rescued, totals.failed, totals.filtered
         ),
     );
+
+    // Which rungs of the ladder did the work. `copy` and `rehost` are the ones
+    // that cost something to reach, so seeing how often they were needed is what
+    // says whether the fallbacks are earning their place.
+    if totals.delivered > 0 {
+        say(
+            Level::Info,
+            theme::dim(&format!(
+                "by forward {} · copy {} · rehost {}",
+                totals.by_forward, totals.by_copy, totals.by_rehost
+            )),
+        );
+    }
+
+    // Per route, but only when there is more than one to tell apart.
+    if snapshot.routes.len() > 1 {
+        for route in &snapshot.routes {
+            eprintln!(
+                "    {}  {}",
+                theme::accent(&route.route),
+                theme::dim(&format!(
+                    "delivered {} · rescued {} · failed {} · filtered {}",
+                    route.delivered, route.rescued, route.failed, route.filtered
+                ))
+            );
+        }
+    }
 
     if totals.rescued > 0 {
         say(

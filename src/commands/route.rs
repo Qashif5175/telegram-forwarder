@@ -124,7 +124,7 @@ fn warn_about_unwritable(targets: &[DialogEntry]) {
 
 /// Derive a unique identifier for a new route, without asking anyone.
 ///
-/// Routes need a stable handle so logs, the dashboard and shell scripts can name
+/// Routes need a stable handle so logs and shell scripts can name
 /// one, but that is a machine's requirement, not the user's. Making someone
 /// invent a name is a decision they did not ask to make, about a string they
 /// will not remember. So it is derived from the first source chat, and collisions
@@ -900,7 +900,7 @@ mod tests {
 
     #[test]
     fn a_route_is_named_to_the_user_by_what_it_moves() {
-        // The identifier is for logs, the dashboard and shell scripts. When a
+        // The identifier is for logs and shell scripts. When a
         // route is put in front of a person — especially at the two points where
         // the picker is skipped because there is only one — it has to be named
         // by what it moves, or the prompt says nothing they can act on.

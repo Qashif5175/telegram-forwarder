@@ -28,7 +28,7 @@ later**. Everything below follows from that.
    delivery time, which is the worst possible moment.
 
 5. **Identifiers are for machines, not people.** A route's `id` exists so logs,
-   the dashboard and shell scripts can name one. It is derived from the source
+   and shell scripts can name one. It is derived from the source
    chat by `auto_id`; the user is never asked to invent or recall it. Anywhere a
    route is offered for selection, show `describe_route` — what it moves — not
    the id. Do not add a prompt that asks the user to name something, and never
@@ -42,7 +42,7 @@ main.rs → cli.rs → commands/ → engine/
                              → telegram/  (all Telegram I/O)
                              → config/    (schema, validation)
                              → session.rs (single-file Session impl)
-                             → ui/        (theme, prompts, logger, TUI)
+                             → ui/        (theme, prompts, logger)
 ```
 
 `telegram/` never depends on `cli/`, `config/` or `ui/`. The login flow asks
@@ -112,12 +112,6 @@ disappearing at cancellation, with no gap left for `getDifference` to recover.
   `PeerRef` (ID *plus* the access hash bound to this account). The bridge is the
   session peer cache, warmed by `dialogs::fetch_all`. Calling it after login is
   not optional — `grammers` also needs it to resolve update gaps.
-- **The dashboard and the logger both want the terminal.** `ratatui` takes an
-  alternate screen buffer on stdout while `tracing` writes to stderr, and one
-  warning repaints over the frame. `ui::logger::defer`/`resume` hold log output
-  in a bounded buffer for the lifetime of the dashboard and replay it afterwards.
-  Suppressing it instead would hide the flood waits and delivery failures the
-  dashboard exists to show.
 - **Values a hand-edited config can hold that nothing downstream can survive**
   are rejected by `Config::validate`, not handled at runtime: `max_in_flight = 0`
   gives the semaphore no permits and hangs every delivery *and* the shutdown that
@@ -214,7 +208,7 @@ so an outage costs latency rather than messages, except for anything deleted
 while it lasted.
 
 The gap this leaves is observability, not correctness: for up to fifteen minutes
-a dead link is indistinguishable from a quiet channel, and the dashboard shows
+a dead link is indistinguishable from a quiet channel, and the log shows
 nothing amiss. Closing that would take an active heartbeat, which is a deliberate
 addition of periodic traffic rather than a bug fix.
 

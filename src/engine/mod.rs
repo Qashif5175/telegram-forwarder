@@ -108,7 +108,7 @@ impl Engine {
         }
     }
 
-    /// Live statistics, shared with the dashboard.
+    /// Counters, summarised when the run ends.
     pub fn stats(&self) -> Arc<Stats> {
         Arc::clone(&self.stats)
     }
@@ -344,7 +344,7 @@ fn dispatch(context: &Context, snapshots: &[Arc<Snapshot>], tasks: &mut JoinSet<
 
     for binding in context.router.bindings_for(primary.source_chat) {
         if let Err(rejection) = filter::evaluate(&binding.filter, &candidate) {
-            context.stats.filtered(&binding.route, rejection.reason());
+            context.stats.filtered(&binding.route);
             tracing::debug!(
                 route = %binding.route,
                 why = rejection.reason(),
@@ -444,10 +444,7 @@ async fn resolve(
     } else {
         // The account is probably no longer a member of the chat. Telling
         // the user which one is far more useful than a generic failure.
-        context.stats.failed(
-            route,
-            format!("{label} ({chat_id}) is not reachable by this account"),
-        );
+        context.stats.failed(route);
         tracing::warn!(route = %route, chat = %label, chat_id, "chat is not in the session cache");
         None
     }

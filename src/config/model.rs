@@ -249,8 +249,8 @@ pub struct DispatchPolicy {
     /// The default is a conservative guess rather than a derived figure:
     /// Telegram does not publish the limits that apply to user accounts, and the
     /// numbers that circulate are the Bot API's, which do not. Treat the
-    /// `waiting` counter on the dashboard as the real signal — if it sits above
-    /// zero, this is too low for the traffic. Zero disables pacing entirely.
+    /// `waiting out a rate limit` log line as the real signal — if it appears at
+    /// all, this is too low for the traffic. Zero disables pacing entirely.
     #[serde(default = "default_per_target_interval", with = "humantime_serde")]
     pub per_target_interval: Duration,
 

@@ -204,8 +204,6 @@ impl Dispatcher {
         target_ref: PeerRef,
         mode: DeliveryMode,
     ) -> Result<()> {
-        let _in_flight = self.stats.begin_delivery();
-
         let describe = payload.primary().describe();
         let latency_from = Arc::clone(payload.primary());
         let total = payload.snapshots.len();
@@ -247,13 +245,7 @@ impl Dispatcher {
         };
 
         let took = latency_from.captured_at.elapsed();
-        self.stats.delivered(
-            route,
-            strategy,
-            took,
-            rescued,
-            format!("{} ← {describe}", target.label),
-        );
+        self.stats.delivered(route, strategy, rescued);
 
         // Every delivery is announced, not just the interesting ones. Without
         // this the default presentation says nothing at all while it is working,
@@ -265,6 +257,7 @@ impl Dispatcher {
                 route = %route,
                 via = strategy.label(),
                 %took,
+                what = %describe,
                 "rescued into {} — the source was already gone",
                 target.label
             );
@@ -274,6 +267,7 @@ impl Dispatcher {
                 route = %route,
                 via = strategy.label(),
                 %took,
+                what = %describe,
                 "delivered to {}",
                 target.label
             );
@@ -428,7 +422,7 @@ impl Dispatcher {
             format!("{}: {reason}", target.label)
         };
 
-        self.stats.failed(route, detail.clone());
+        self.stats.failed(route);
         color_eyre::eyre::eyre!("delivery to {detail}")
     }
 
@@ -514,7 +508,6 @@ impl Dispatcher {
                             seconds = delay.as_secs(),
                             "waiting out a rate limit"
                         );
-                        let _waiting = self.stats.begin_wait();
                         tokio::time::sleep(delay).await;
                     }
 

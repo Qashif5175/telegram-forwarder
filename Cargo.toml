@@ -53,7 +53,6 @@ tokio = { version = "1", features = [
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 clap_complete = "4"
 inquire = "0.9"
-ratatui = "0.30"
 
 # Diagnostics.
 color-eyre = "0.6"
