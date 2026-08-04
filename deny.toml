@@ -10,17 +10,18 @@
 ignore = []
 
 [licenses]
-# Licences this binary may carry. Everything here was taken from the actual
-# dependency graph rather than copied from another project's list.
+# Licences this binary may carry. Every entry was taken from the actual
+# dependency graph rather than copied from another project's list — and an entry
+# nothing uses is an error, so the list cannot quietly fill up with permissions
+# granted "just in case". Two did, before this was set.
+unused-allowed-license = "deny"
 allow = [
   "MIT",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
   "BSD-2-Clause",
-  "BSD-3-Clause",
   "0BSD",
   "BSL-1.0",
-  "ISC",
   "Unicode-3.0",
   "Unlicense",
   "Zlib",
