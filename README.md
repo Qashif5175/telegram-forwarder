@@ -418,7 +418,8 @@ cargo clippy --all-targets    # must be clean; pedantic lints are on
 cargo fmt                     # or `cargo fmt --check` to verify without writing
 cargo shear                   # unused dependencies; cargo install cargo-shear
 typos                         # spell check; cargo install typos-cli
-actionlint                    # workflow files; brew install actionlint
+actionlint                    # workflow syntax; brew install actionlint
+zizmor .github/workflows/     # workflow security; brew install zizmor
 ```
 
 Every one of these runs in CI on each push and pull request, along with a release

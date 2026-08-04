@@ -155,7 +155,8 @@ cargo clippy --all-targets    # must be clean; pedantic is on
 cargo fmt
 cargo shear                   # unused dependencies; cargo install cargo-shear
 typos                         # spelling; cargo install typos-cli
-actionlint                    # GitHub workflow files; brew install actionlint
+actionlint                    # workflow syntax; brew install actionlint
+zizmor .github/workflows/     # workflow security; brew install zizmor
 cargo run -- --help
 ```
 
