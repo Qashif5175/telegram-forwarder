@@ -2,7 +2,13 @@
 name = "telegram-forwarder"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.90"
+# Equal to the channel in `rust-toolchain.toml`, deliberately. That file makes
+# every build from source use this exact version, so a lower figure here would be
+# a minimum nothing ever compiles against and nothing would notice going stale.
+# `helix` resolves it the same way; `uv` and `ruff` keep a gap, but they publish
+# libraries to crates.io where the number is load-bearing, and this ships as a
+# prebuilt binary where it is not.
+rust-version = "1.97.1"
 description = "Many-to-many Telegram channel forwarder built for messages that get deleted seconds after they are posted"
 authors = ["telegram-forwarder contributors"]
 license = "MIT"

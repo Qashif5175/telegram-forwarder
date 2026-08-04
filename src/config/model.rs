@@ -465,7 +465,7 @@ const fn default_snapshot_max_bytes() -> u64 {
 }
 
 const fn default_snapshot_ttl() -> Duration {
-    Duration::from_secs(60 * 60)
+    Duration::from_hours(1)
 }
 
 /// Long enough for the parts of an album to land together in practice, short
@@ -483,7 +483,7 @@ const fn default_max_attempts() -> u32 {
 }
 
 const fn default_max_flood_wait() -> Duration {
-    Duration::from_secs(300)
+    Duration::from_mins(5)
 }
 
 const fn default_max_in_flight() -> usize {

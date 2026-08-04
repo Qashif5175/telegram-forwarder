@@ -363,7 +363,7 @@ mod tests {
         assert!(!fresh.exists(), "an expired entry should be removed");
 
         fs_err::write(&fresh, b"x").unwrap();
-        sweep_expired(dir.path(), std::time::Duration::from_secs(3600));
+        sweep_expired(dir.path(), std::time::Duration::from_hours(1));
         assert!(fresh.exists(), "a fresh entry should survive");
     }
 
