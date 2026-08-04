@@ -23,10 +23,19 @@
   // whatever each person has set globally.
   "[markdown]": {
     "editor.formatOnSave": false
-  }
+  },
 
-  // TOML is deliberately absent. `just fmt` does not check it, so any formatter
-  // named here would rewrite Cargo.toml, clippy.toml and deny.toml — comments,
-  // spacing and all — to a standard the project does not have and CI does not
-  // enforce.
+  // `taplo`, through the extension that embeds it. The rules it follows are in
+  // `.taplo.toml` rather than here, so the same formatting applies to anyone
+  // running `taplo` directly and does not depend on per-editor defaults.
+  "[toml]": {
+    "editor.defaultFormatter": "tamasfe.even-better-toml",
+    "editor.formatOnSave": true
+  },
+
+  // Key and array order carries meaning in `deny.toml` and `dist-workspace.toml`
+  // — see `.taplo.toml`. This extension can reorder independently of the rules
+  // in that file, so it is turned off here as well.
+  "evenBetterToml.formatter.reorderKeys": false,
+  "evenBetterToml.formatter.reorderArrays": false
 }

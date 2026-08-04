@@ -1,0 +1,20 @@
+# Formatting rules for the TOML files in this repository, read by `taplo` and by
+# the Even Better TOML extension that embeds it.
+#
+# Committed for the same reason the `justfile` is: so the result does not depend
+# on what each person happens to have configured. Without it, two editors set to
+# "format on save" produce two different files.
+
+[formatting]
+# 100 rather than the default 80. At 80, a dependency with a single feature —
+# `grammers-session` — is split across three lines, which is longer and no
+# clearer than the one it replaces.
+column_width = 100
+
+# Both default to false; stated because the defaults are load-bearing here.
+# `deny.toml`'s licence list is grouped by how permissive each entry is, and
+# `dist-workspace.toml` lists targets in the order the release notes read. Sorting
+# either alphabetically would destroy information that the comments then describe
+# incorrectly.
+reorder_keys = false
+reorder_arrays = false
