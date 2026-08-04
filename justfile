@@ -19,7 +19,7 @@ default:
 # Install everything the other recipes call.
 setup:
     cargo install cargo-binstall
-    cargo binstall --no-confirm cargo-shear cargo-deny typos-cli zizmor
+    cargo binstall --no-confirm cargo-shear cargo-deny git-cliff typos-cli zizmor
     @echo "actionlint is not a crate — install it with: brew install actionlint"
 
 # Run every check CI runs, across all of its workflows.
@@ -57,6 +57,16 @@ audit:
 workflows:
     actionlint
     zizmor --no-progress .github/workflows/
+
+# Prepend the next version's entry to CHANGELOG.md, generated from the commits
+# since the last tag. `dist` puts that section into the GitHub Release body.
+#
+#   just changelog v0.2.0
+#
+# The 0.1.0 entry is written by hand: a generated "Fixed" list would describe
+# repairs to code no release had ever carried.
+changelog version:
+    git cliff --unreleased --tag {{ version }} --prepend CHANGELOG.md
 
 # Regenerate the release workflow after changing dist-workspace.toml, and fail
 # if it was left stale. `dist` writes the workflow; it is committed like any

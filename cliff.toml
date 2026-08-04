@@ -1,0 +1,60 @@
+# Changelog generation from the commit history.
+#
+# The commits are already Conventional Commits — enforced on pull request
+# titles by `.github/workflows/semantic-pr.yml` — so the changelog is derived
+# rather than written twice. `dist` reads CHANGELOG.md and puts the section for
+# the version being released into the GitHub Release body.
+#
+#   just changelog
+
+[changelog]
+# Keep a Changelog headings, which is the shape `dist` knows how to read.
+header = """
+# Changelog
+
+All notable changes to this project are documented here.
+
+"""
+
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }}\
+{% endfor %}
+{% endfor %}
+"""
+
+trim = true
+
+[git]
+conventional_commits = true
+# A commit that does not follow the convention is left out rather than dumped in
+# unparsed: the changelog is for people reading releases, not a second `git log`.
+filter_unconventional = true
+protect_breaking_commits = true
+split_commits = false
+
+commit_parsers = [
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^docs", group = "Documentation" },
+  # Housekeeping that changes nothing a user of the binary can observe. It stays
+  # in the git history, where it belongs, and out of the release notes.
+  { message = "^chore", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^build", skip = true },
+  { message = "^test", skip = true },
+  { message = "^style", skip = true },
+]
+
+filter_commits = false
+topo_order = false
+sort_commits = "oldest"

@@ -216,7 +216,13 @@ addition of periodic traffic rather than a bug fix.
 
 A pushed tag matching `v*` is the whole trigger. `dist` builds the five target
 platforms, writes the installer scripts, checksums everything and creates the
-GitHub Release.
+GitHub Release, whose body is the matching section of `CHANGELOG.md`.
+
+So the order is: `just changelog vX.Y.Z`, bump the version in `Cargo.toml`,
+commit, tag, push. The changelog entry is generated from the commits since the
+last tag, which is what the Conventional Commits convention is being enforced
+for. The 0.1.0 entry is written by hand — a generated list of fixes would have
+described repairs to code that no release had ever carried.
 
 `.github/workflows/release.yml` is **generated** from `dist-workspace.toml` and
 committed, so the pipeline keeps working whatever happens to the tool. Never
