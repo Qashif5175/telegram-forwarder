@@ -626,13 +626,14 @@ pub async fn set_enabled(paths: &Paths, route: Option<String>, enabled: bool) ->
 
 /// `tgfwd route sync` — refresh stored chat titles.
 pub async fn sync(paths: &Paths) -> Result<()> {
-    let mut config = super::load_config_with_credentials(paths).await?;
-
-    if config.routes.is_empty() {
+    // Having nothing to sync is knowable from the file, so it is settled before
+    // the credential prompt rather than after it.
+    if Config::load(paths)?.routes.is_empty() {
         say(Level::Info, "no routes to sync");
         return Ok(());
     }
 
+    let mut config = super::load_config_with_credentials(paths).await?;
     let (connection, chats) = super::fetch_chats(paths, &config).await?;
     let mut renamed = 0;
     let mut missing = Vec::new();
@@ -668,7 +669,6 @@ pub async fn sync(paths: &Paths) -> Result<()> {
     connection.shutdown().await
 }
 
-/// Resolve a route ID, prompting when it was not given on the command line.
 /// Which routes a picker should offer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Selectable {

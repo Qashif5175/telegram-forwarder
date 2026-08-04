@@ -12,7 +12,13 @@ use super::say;
 
 /// Start forwarding until interrupted.
 pub async fn run(paths: &Paths, catch_up: bool) -> Result<()> {
-    let config = super::load_config_with_credentials(paths).await?;
+    // Everything answerable from the file is answered before anything is asked
+    // for. A first run has neither credentials nor routes, and prompting for an
+    // API key first means walking someone through my.telegram.org — a minute of
+    // clicking on a third-party site — only to tell them afterwards that there
+    // was nothing to forward anyway. `route add` asks for the key when it is
+    // actually needed.
+    let config = Config::load(paths)?;
     config.validate()?;
 
     if config.active_routes().next().is_none() {
@@ -22,6 +28,7 @@ pub async fn run(paths: &Paths, catch_up: bool) -> Result<()> {
         bail!("every route is disabled — enable one with `tgfwd route enable <id>`");
     }
 
+    let config = super::load_config_with_credentials(paths).await?;
     let (mut connection, user) = super::connect_signed_in(paths, &config).await?;
     say(
         Level::Success,
