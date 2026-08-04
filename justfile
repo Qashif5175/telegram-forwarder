@@ -23,7 +23,7 @@ setup:
     @echo "actionlint is not a crate — install it with: brew install actionlint"
 
 # Run every check CI runs, across all of its workflows.
-check: fmt lint test unused spell workflows
+check: fmt lint test unused spell workflows release-check
 
 # Verify formatting without rewriting anything.
 fmt:
@@ -57,6 +57,13 @@ audit:
 workflows:
     actionlint
     zizmor --no-progress .github/workflows/
+
+# Regenerate the release workflow after changing dist-workspace.toml, and fail
+# if it was left stale. `dist` writes the workflow; it is committed like any
+# other file, so the pipeline outlives the tool.
+release-check:
+    dist generate --check
+    dist plan
 
 # Build as released, for all platforms CI covers.
 build:

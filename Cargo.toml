@@ -10,6 +10,19 @@ repository = "https://github.com/awdr74100/telegram-forwarder"
 keywords = ["telegram", "mtproto", "forwarder", "cli"]
 categories = ["command-line-utilities"]
 
+# Not published to crates.io: installing this would mean asking a user to have a
+# Rust toolchain and then wait through a build, when the whole point of shipping
+# a single static binary is that they need neither. Distribution is the GitHub
+# Release and the installer scripts. This flag makes an accidental `cargo
+# publish` fail rather than succeed.
+publish = false
+
+# `publish = false` also hides the package from `dist`, which reads it as "not
+# for distribution" rather than "not for crates.io". This says which of the two
+# was meant.
+[package.metadata.dist]
+dist = true
+
 [[bin]]
 name = "tgfwd"
 path = "src/main.rs"

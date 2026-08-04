@@ -52,6 +52,31 @@ binary and the session is one JSON file.
 
 ## Install
 
+**macOS and Linux**
+
+```sh
+curl -LsSf https://github.com/awdr74100/telegram-forwarder/releases/latest/download/telegram-forwarder-installer.sh | sh
+```
+
+**Windows**
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/awdr74100/telegram-forwarder/releases/latest/download/telegram-forwarder-installer.ps1 | iex"
+```
+
+Both fetch a prebuilt binary for your platform, check it against the published
+checksum, and put `tgfwd` on your `PATH`. **Updating is the same command** —
+there is no separate updater to keep track of.
+
+Prefer to do it yourself? Every release carries an archive per platform, each
+with its own `.sha256`, on the
+[releases page](https://github.com/awdr74100/telegram-forwarder/releases).
+
+<details>
+<summary>Building from source</summary>
+
+Not required to use this — only to work on it.
+
 ```sh
 git clone https://github.com/awdr74100/telegram-forwarder
 cd telegram-forwarder
@@ -59,11 +84,11 @@ cargo build --release
 ./target/release/tgfwd --help
 ```
 
-Put it on your `PATH` if you want to type `tgfwd` instead of the full path:
+This crate is deliberately not published to crates.io: `cargo install` would ask
+for a Rust toolchain and a few minutes of compiling to deliver a binary the
+installer above hands over in seconds.
 
-```sh
-cargo install --path .
-```
+</details>
 
 ## Where the login details come from
 

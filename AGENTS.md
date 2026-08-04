@@ -212,7 +212,30 @@ a dead link is indistinguishable from a quiet channel, and the dashboard shows
 nothing amiss. Closing that would take an active heartbeat, which is a deliberate
 addition of periodic traffic rather than a bug fix.
 
+## Releasing
+
+A pushed tag matching `v*` is the whole trigger. `dist` builds the five target
+platforms, writes the installer scripts, checksums everything and creates the
+GitHub Release.
+
+`.github/workflows/release.yml` is **generated** from `dist-workspace.toml` and
+committed, so the pipeline keeps working whatever happens to the tool. Never
+edit it by hand: change the config and run `just release-check`, which
+regenerates it and fails if it was left stale.
+
+That file is also the one place the repository's own standards are relaxed. It
+is generated code holding write access to releases, so the exemptions in
+`.github/zizmor.yml` and `.github/actionlint.yaml` name individual rules rather
+than skipping the file — a new kind of finding still fails, which was verified
+by planting one.
+
+**Not published to crates.io.** `cargo install` would ask a user for a Rust
+toolchain and a compile to deliver what the installer hands over in seconds.
+`publish = false` in `Cargo.toml` makes an accidental publish fail; the
+accompanying `[package.metadata.dist] dist = true` is what tells `dist` the
+binary is still meant to ship, since it reads `publish = false` as "not for
+distribution" otherwise.
+
 ## Not done yet
 
-CI, release packaging, and publishing to crates.io are deliberately out of scope
-so far.
+Homebrew, and any distribution channel beyond the GitHub Release.

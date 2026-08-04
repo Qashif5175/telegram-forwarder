@@ -1,0 +1,53 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+#
+# `dist` turns a pushed tag into prebuilt binaries, installer scripts and a
+# GitHub Release. It generates `.github/workflows/release.yml`, which is then
+# committed like any other file — so the release pipeline keeps working whatever
+# happens to the tool itself.
+#
+# Regenerate the workflow after changing anything here:
+#
+#   just release-check
+[dist]
+cargo-dist-version = "0.32.0"
+ci = "github"
+
+# The two the README tells people to use. Everything else is a download from the
+# GitHub Release.
+installers = ["shell", "powershell"]
+
+# One build per platform anyone plausibly runs this on. Both macOS
+# architectures because Intel Macs are still around; both Linux architectures
+# because servers, which is where a forwarder meant to stay running belongs.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+
+# Nothing on a pull request: a release is a tag, and building five platforms on
+# every PR would cost more than it tells anyone.
+pr-run-mode = "skip"
+
+# No bundled self-updater. `uv` reaches the same conclusion for the same reason:
+# re-running the install script fetches the current version, which is one
+# mechanism instead of two, and one fewer binary shipped.
+install-updater = false
+
+# Provenance for every artifact, so a download can be traced back to the
+# workflow run that produced it.
+github-attestations = true
+
+# Actions pinned by commit, matching the major version `dist` generates. A
+# moving tag is a build that can change without anyone touching this repository,
+# and this is the workflow with write access to releases.
+[dist.github-action-commits]
+"actions/checkout" = "d23441a48e516b6c34aea4fa41551a30e30af803" # v6.1.0
+"actions/download-artifact" = "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" # v8.0.1
+"actions/upload-artifact" = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" # v7.0.1
+"actions/attest" = "508db95dd578ae2727ebd6217d5ba78e4fbda05d" # v4.2.1
