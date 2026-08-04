@@ -51,7 +51,7 @@ pub fn edit(paths: &Paths) -> Result<()> {
         bail!("editor '{program}' exited with an error");
     }
 
-    // Re-read it: an unparseable config discovered now is a much better
+    // Re-read it: a config that will not parse, discovered now, is a much better
     // experience than one discovered when forwarding is supposed to start.
     match Config::load(paths) {
         Ok(config) => match config.validate() {

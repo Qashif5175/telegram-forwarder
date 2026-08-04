@@ -114,7 +114,7 @@ impl Rejection {
 
 /// Decide whether `candidate` passes `filter`.
 ///
-/// Conditions are `ANDed`. Keyword matching is case-insensitive substring
+/// Every condition must hold. Keyword matching is case-insensitive substring
 /// matching, which is what people expect from a "contains" filter and avoids
 /// making users learn a regex dialect.
 pub fn evaluate(filter: &Filter, candidate: &Candidate) -> Result<(), Rejection> {

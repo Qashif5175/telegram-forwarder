@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the first run's answer irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep CI logs about this crate rather than about fetching the registry.
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Everything that needs no compiler, so a stray typo or an unformatted file
+  # fails in seconds instead of after a full build.
+  quick:
+    name: format and spelling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `rust-toolchain.toml` pins the version and asks for rustfmt, so rustup
+      # installs exactly what the maintainers use. No version is repeated here.
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Spelling
+        uses: crate-ci/typos@v1
+
+  lint:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+
+      # `--all-targets` reaches tests and benches too; pedantic is enabled in
+      # Cargo.toml, and warnings are failures here even though they are not
+      # locally, so nothing lands half-tidied.
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+  test:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+
+      # `--locked` doubles as a lock file check: a dependency bumped without
+      # committing Cargo.lock fails here rather than drifting silently.
+      # No `--doc` run to accompany this: `cargo test --doc` fails outright on
+      # a crate with no library target, which this binary has not got.
+      - name: Tests
+        run: cargo test --all-targets --locked
+
+  unused:
+    name: unused dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+
+      # Four dependencies had accumulated before this was added, including a
+      # rate limiter that had been replaced by hand-written code long ago. The
+      # compiler cannot see them, so something else has to look.
+      - name: Install cargo-shear
+        run: cargo install cargo-shear --locked
+      - name: Check for unused dependencies
+        run: cargo shear
+
+  build:
+    name: release build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+
+      # The point of the matrix is the platform-specific code: the session
+      # file's permissions and the config directory layout both differ on
+      # Windows, and neither is exercised by building on Linux alone.
+      - name: Build
+        run: cargo build --release --locked

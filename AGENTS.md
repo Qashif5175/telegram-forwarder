@@ -150,11 +150,18 @@ under one root, which is what the tests and multi-account setups use.
 ## Commands
 
 ```sh
-cargo test                    # 109 tests, all offline
+cargo test                    # 120 tests, all offline
 cargo clippy --all-targets    # must be clean; pedantic is on
 cargo fmt
+cargo shear                   # unused dependencies; cargo install cargo-shear
+typos                         # spelling; cargo install typos-cli
 cargo run -- --help
 ```
+
+CI runs exactly these on every push and pull request, with warnings promoted to
+errors and `--locked` so a dependency bumped without committing `Cargo.lock`
+fails there rather than drifting. There is no `cargo test --doc` step: this crate
+has no library target, and that command errors out rather than finding nothing.
 
 Exceptions to clippy's pedantic set live in `Cargo.toml` under `[lints.clippy]`,
 each with a written justification. Add to that list only with a reason.

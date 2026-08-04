@@ -9,3 +9,5 @@ extend-exclude = ["Cargo.lock", "target/", ".local/"]
 grammers = "grammers"
 mtproto = "mtproto"
 tgfwd = "tgfwd"
+# Crate names.
+ratatui = "ratatui"

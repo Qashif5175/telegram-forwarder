@@ -209,8 +209,7 @@ tgfwd route list                    # shows the names
 
 ## Filtering
 
-Optional, per route. Every condition is ANDed — a message has to satisfy all of
-them to be forwarded.
+Optional, per route. A message has to satisfy every condition to be forwarded.
 
 | Setting | Effect |
 |---|---|
@@ -414,11 +413,17 @@ the one that is otherwise invisible until a delivery fails.
 ## Development
 
 ```sh
-cargo test                    # 109 tests, all offline — no network, no account
+cargo test                    # 120 tests, all offline — no network, no account
 cargo clippy --all-targets    # must be clean; pedantic lints are on
 cargo fmt                     # or `cargo fmt --check` to verify without writing
+cargo shear                   # unused dependencies; cargo install cargo-shear
 typos                         # spell check; cargo install typos-cli
 ```
+
+Every one of these runs in CI on each push and pull request, along with a release
+build on Linux, macOS and Windows — the session file's permissions and the config
+directory layout both differ on Windows, and building on Linux alone would never
+exercise either.
 
 The toolchain is pinned in `rust-toolchain.toml`, so `rustup` installs the right
 version automatically on first build — there is no setup step. Clippy runs with

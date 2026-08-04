@@ -353,7 +353,7 @@ impl fmt::Display for PeerLink {
 
 /// Content filter applied before a message is dispatched.
 ///
-/// All conditions are `ANDed`. Keyword matching is case-insensitive substring
+/// Every condition must hold. Keyword matching is case-insensitive substring
 /// matching against the message text (or media caption).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
