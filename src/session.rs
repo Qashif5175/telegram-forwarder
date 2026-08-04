@@ -202,7 +202,7 @@ impl FileSession {
         // Write to a sibling and rename, so an interrupted write cannot destroy a
         // working session.
         let tmp = self.path.with_extension("json.tmp");
-        write_private(&tmp, &json).map_err(|source| SessionError::Io {
+        crate::private_file::write(&tmp, &json).map_err(|source| SessionError::Io {
             path: tmp.clone(),
             source,
         })?;
@@ -223,39 +223,6 @@ impl FileSession {
         self.dirty.store(true, Ordering::Release);
         Ok(out)
     }
-}
-
-/// Write `bytes` to a file only its owner can read.
-///
-/// The contents are an authorization key: whoever reads it is logged into the
-/// account. The permissions are set *as the file is created* rather than
-/// afterwards, because a create-then-chmod leaves a window in which the key sits
-/// on disk at whatever the umask allows. On platforms without Unix permissions
-/// this is an ordinary write.
-#[cfg(unix)]
-fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    // `fs_err` does not surface the Unix-only `mode`, and the whole point here is
-    // to create the file with it already applied. The caller attaches the path to
-    // any error, so nothing is lost by dropping to `std`.
-    use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
-
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-
-    file.write_all(bytes)?;
-    // The rename that follows is atomic, but only with respect to content that
-    // actually reached the disk.
-    file.sync_all()
-}
-
-#[cfg(not(unix))]
-fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    fs_err::write(path, bytes)
 }
 
 impl Session for FileSession {
@@ -457,21 +424,6 @@ mod tests {
 
         let mode = fs_err::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o077, 0, "session file must be owner-only");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_private_file_is_never_briefly_readable() {
-        use std::os::unix::fs::PermissionsExt;
-
-        // Creating the file and then tightening it would leave the key on disk
-        // at the umask's discretion for as long as the write takes.
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("secret");
-        write_private(&path, b"key").unwrap();
-
-        let mode = fs_err::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o077, 0, "{mode:o} exposes the file to other users");
     }
 
     #[tokio::test]

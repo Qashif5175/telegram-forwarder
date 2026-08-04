@@ -42,10 +42,16 @@ impl Config {
         toml::from_str(&text).wrap_err_with(|| format!("{} is not valid config", path.display()))
     }
 
-    /// Write the configuration atomically.
+    /// Write the configuration atomically, readable by its owner alone.
     ///
     /// The write goes to a sibling temporary file which is then renamed over the
     /// target, so a crash mid-write cannot leave a truncated config behind.
+    ///
+    /// Private for the same reason the session file is: this holds `api_hash`.
+    /// It is a weaker secret than an authorization key — it names the
+    /// application rather than the account, and cannot sign anybody in on its
+    /// own — but it is still not something to hand to every other user of a
+    /// shared machine, and the tool already knows how to avoid that.
     pub fn save(&self, paths: &Paths) -> Result<()> {
         paths.ensure_dirs()?;
         let path = paths.config_file();
@@ -55,7 +61,7 @@ impl Config {
         text.push_str(&body);
 
         let tmp = path.with_extension("toml.tmp");
-        fs_err::write(&tmp, text.as_bytes())
+        crate::private_file::write(&tmp, text.as_bytes())
             .wrap_err_with(|| format!("failed to write {}", tmp.display()))?;
         fs_err::rename(&tmp, &path)
             .wrap_err_with(|| format!("failed to replace {}", path.display()))?;

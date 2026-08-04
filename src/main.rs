@@ -6,6 +6,7 @@ mod cli;
 mod commands;
 mod config;
 mod engine;
+mod private_file;
 mod session;
 mod telegram;
 mod ui;
