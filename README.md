@@ -448,8 +448,10 @@ CI runs the same recipes, so a clean `just check` is a clean pipeline.
 ```sh
 brew install just actionlint   # actionlint is Go, not a crate
 just setup                     # the rest, as prebuilt binaries
-just audit                     # dependency licences and security advisories
 ```
+
+`just setup` installs into `~/.cargo/bin`; the recipes put that on `PATH`
+themselves, so nothing needs adding to your shell profile.
 
 CI also builds for release on Linux, macOS and Windows: the session file's
 permissions and the config directory layout both differ on Windows, and building

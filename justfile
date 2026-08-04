@@ -7,6 +7,11 @@
 #
 # Needs `just` itself, then `just setup` for everything the recipes call.
 
+# `cargo install` puts binaries in ~/.cargo/bin. Prepending it here means the
+# recipes work whether or not the surrounding shell happens to have it, rather
+# than failing with a bare "command not found" that says nothing about why.
+export PATH := env_var('HOME') / '.cargo/bin:' + env_var('PATH')
+
 # Show the available recipes.
 default:
     @just --list
