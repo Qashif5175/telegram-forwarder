@@ -965,14 +965,19 @@ mod tests {
     async fn a_chat_that_has_been_idle_is_not_made_to_wait() {
         // The reservation from a previous delivery is long past, so it must not
         // be turned into a fresh interval of waiting.
-        let pacer = Pacer::new(Duration::from_millis(50));
+        // The bound is deliberately far from both sides of the question: a
+        // regression makes this wait the full 200ms, and passing needs only that
+        // it took under 50, which is a long time for a lock and some arithmetic.
+        // An upper bound is the one shape of timing assertion a loaded CI runner
+        // can break, so it is given an order of magnitude rather than a margin.
+        let pacer = Pacer::new(Duration::from_millis(200));
         pacer.acquire(-1001).await;
-        tokio::time::sleep(Duration::from_millis(80)).await;
+        tokio::time::sleep(Duration::from_millis(260)).await;
 
         let start = Instant::now();
         pacer.acquire(-1001).await;
         assert!(
-            start.elapsed() < Duration::from_millis(25),
+            start.elapsed() < Duration::from_millis(50),
             "an idle chat waited {:?}",
             start.elapsed()
         );

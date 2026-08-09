@@ -71,9 +71,16 @@ fn open_private(path: &Path) -> io::Result<std::fs::File> {
         Err(error) => return Err(error),
     }
 
+    // `create` rather than `create_new`: the unlink above is what makes the mode
+    // apply, and refusing to open an existing file would only add a way to fail.
+    // Two snapshots of one message can race for the same cache path — an update
+    // replayed after a gap is captured again, since only messages this tool
+    // *produced* are deduplicated — and the loser of that race would otherwise
+    // lose its bytes and with them the bottom rung of the delivery ladder.
     std::fs::OpenOptions::new()
         .write(true)
-        .create_new(true)
+        .create(true)
+        .truncate(true)
         .mode(0o600)
         .open(path)
 }
@@ -132,6 +139,22 @@ mod tests {
         let mode = fs_err::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o077, 0, "{mode:o} exposes snapshotted media");
         assert!(fs_err::read(&path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn creating_the_same_path_twice_succeeds() {
+        // One message can be captured more than once — an update replayed after
+        // a gap arrives as a new message, and only messages this tool produced
+        // are deduplicated — so two download tasks can share a cache path.
+        // Refusing the second would cost it the bytes the rehost rung needs.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("twice.bin");
+
+        create(&path).unwrap();
+        create(&path).unwrap();
+
+        let mode = fs_err::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "{mode:o} exposes snapshotted media");
     }
 
     #[test]
