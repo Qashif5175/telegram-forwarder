@@ -121,3 +121,14 @@ match_same_arms = "allow"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# `dist` builds the shipped binaries with `--profile dist`, so without this the
+# release workflow fails on every platform at once with `profile `dist` is not
+# defined` — which is what happened to the first v0.1.0 tag. `dist init` writes
+# this section; it was never run here.
+#
+# Inheriting rather than repeating keeps one definition of how the shipped
+# binary is built. `cargo-dist` itself, `uv` and `ruff` all inherit from release
+# the same way.
+[profile.dist]
+inherits = "release"

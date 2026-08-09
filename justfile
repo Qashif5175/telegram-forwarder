@@ -99,6 +99,14 @@ release-check:
     dist generate --check
     dist plan
 
-# Build as released, for all platforms CI covers.
+# Build the way a release is built.
+#
+# `--profile dist`, not `--release`: `dist` builds the shipped binaries with a
+# profile of its own, and this recipe claimed to build "as released" while
+# using a different one. Nothing local exercised the real profile, so a missing
+# `[profile.dist]` survived a green `just check` and failed the v0.1.0 release
+# on all five platforms at once.
+#
+# Worth running before tagging — see `.local/RELEASE.md`.
 build:
-    cargo build --release --locked
+    cargo build --profile dist --locked
