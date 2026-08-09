@@ -1,0 +1,41 @@
+# `cargo release` prepares a release; it does not publish one.
+#
+# Run it without `--execute` first: dry-run is the default, and it prints every
+# step it would take. `cargo release 0.1.0 -x` then writes the changelog, commits
+# and tags — all locally. Pushing is a separate, manual act.
+#
+#   cargo release 0.1.0        # dry run
+#   cargo release 0.1.0 -x     # do it, locally
+#
+# See `.local/RELEASE.md` for the whole procedure.
+
+allow-branch = ["main"]
+
+# `publish = false` in Cargo.toml is not enough: cargo-release plans a publish
+# step regardless of it, so the refusal has to be stated here too.
+publish = false
+
+# The tag is the trigger for `.github/workflows/release.yml`, which builds five
+# platforms and creates a public GitHub Release. While the tag is only local it
+# costs `git tag -d` to change your mind; once pushed it costs deleting a
+# release. So cargo-release stops at the tag and the push is typed by hand.
+push = false
+
+# `v*` is what release.yml matches on. This is also cargo-release's default for
+# a single-package repository, written out because the pipeline depends on it.
+tag-name = "v{{version}}"
+
+pre-release-commit-message = "chore(release): v{{version}}"
+tag-message = "v{{version}}"
+
+# The changelog is generated here rather than beforehand, which is what keeps
+# its dates honest: the entry is written in the same second as the commit that
+# carries it and the tag that names it.
+pre-release-hook = [
+  "git-cliff",
+  "--unreleased",
+  "--tag",
+  "v{{version}}",
+  "--prepend",
+  "CHANGELOG.md",
+]
