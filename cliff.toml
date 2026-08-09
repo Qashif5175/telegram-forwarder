@@ -5,7 +5,10 @@
 # rather than written twice. `dist` reads CHANGELOG.md and puts the section for
 # the version being released into the GitHub Release body.
 #
-#   just changelog
+# The file is written at release time by `release.toml`'s pre-release hook, not
+# by hand and not ahead of the release: before `cargo release` runs there is no
+# entry for the version, so there is nothing to hold a date that has not
+# happened yet. `just changelog` previews the next entry without writing it.
 
 [changelog]
 # Keep a Changelog headings, which is the shape `dist` knows how to read.
@@ -23,7 +26,7 @@ body = """
 ## [Unreleased]
 {% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
-### {{ group | upper_first }}
+### {{ group | striptags | trim | upper_first }}
 {% for commit in commits %}
 - {{ commit.message | upper_first }}\
 {% endfor %}
@@ -40,19 +43,29 @@ filter_unconventional = true
 protect_breaking_commits = true
 split_commits = false
 
+# Nothing is skipped. A changelog that quietly drops whole categories of work
+# asks the reader to trust that what was dropped did not matter, and the
+# judgement of which work matters is not one a config file can make. `build` in
+# particular is user-visible here — static linking on Windows and the minimum
+# toolchain both live there.
+#
+# The release commit `cargo release` makes for itself does not need excluding:
+# it is committed before the tag is placed, so it *is* the tagged commit, and
+# `--unreleased` only ever sees commits after a tag. Verified by releasing into
+# a throwaway clone and generating the next version's entry.
+#
+# The `<!-- n -->` prefix only orders the groups; the template strips it.
 commit_parsers = [
-  { message = "^feat", group = "Added" },
-  { message = "^fix", group = "Fixed" },
-  { message = "^perf", group = "Performance" },
-  { message = "^refactor", group = "Changed" },
-  { message = "^docs", group = "Documentation" },
-  # Housekeeping that changes nothing a user of the binary can observe. It stays
-  # in the git history, where it belongs, and out of the release notes.
-  { message = "^chore", skip = true },
-  { message = "^ci", skip = true },
-  { message = "^build", skip = true },
-  { message = "^test", skip = true },
-  { message = "^style", skip = true },
+  { message = "^feat", group = "<!-- 0 -->Added" },
+  { message = "^fix", group = "<!-- 1 -->Fixed" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^refactor", group = "<!-- 3 -->Changed" },
+  { message = "^docs", group = "<!-- 4 -->Documentation" },
+  { message = "^test", group = "<!-- 5 -->Testing" },
+  { message = "^build", group = "<!-- 6 -->Build" },
+  { message = "^ci", group = "<!-- 7 -->CI" },
+  { message = "^style", group = "<!-- 8 -->Styling" },
+  { message = "^chore", group = "<!-- 9 -->Miscellaneous" },
 ]
 
 filter_commits = false
