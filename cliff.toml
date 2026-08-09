@@ -54,18 +54,25 @@ split_commits = false
 # `--unreleased` only ever sees commits after a tag. Verified by releasing into
 # a throwaway clone and generating the next version's entry.
 #
-# The `<!-- n -->` prefix only orders the groups; the template strips it.
+# The `<!-- nn -->` prefix only orders the groups; the template strips it. The
+# sort is lexicographic, so the numbers are padded: with single digits an
+# eleventh group would order itself between 1 and 2.
+#
+# Every type `.github/workflows/semantic-pr.yml` accepts appears here. `revert`
+# did not, and git-cliff fell back to inventing a group for it — which placed a
+# reverted change wherever the tool felt like rather than where this file says.
 commit_parsers = [
-  { message = "^feat", group = "<!-- 0 -->Added" },
-  { message = "^fix", group = "<!-- 1 -->Fixed" },
-  { message = "^perf", group = "<!-- 2 -->Performance" },
-  { message = "^refactor", group = "<!-- 3 -->Changed" },
-  { message = "^docs", group = "<!-- 4 -->Documentation" },
-  { message = "^test", group = "<!-- 5 -->Testing" },
-  { message = "^build", group = "<!-- 6 -->Build" },
-  { message = "^ci", group = "<!-- 7 -->CI" },
-  { message = "^style", group = "<!-- 8 -->Styling" },
-  { message = "^chore", group = "<!-- 9 -->Miscellaneous" },
+  { message = "^feat", group = "<!-- 00 -->Added" },
+  { message = "^fix", group = "<!-- 01 -->Fixed" },
+  { message = "^perf", group = "<!-- 02 -->Performance" },
+  { message = "^refactor", group = "<!-- 03 -->Changed" },
+  { message = "^revert", group = "<!-- 04 -->Reverted" },
+  { message = "^docs", group = "<!-- 05 -->Documentation" },
+  { message = "^test", group = "<!-- 06 -->Testing" },
+  { message = "^build", group = "<!-- 07 -->Build" },
+  { message = "^ci", group = "<!-- 08 -->CI" },
+  { message = "^style", group = "<!-- 09 -->Styling" },
+  { message = "^chore", group = "<!-- 10 -->Miscellaneous" },
 ]
 
 filter_commits = false

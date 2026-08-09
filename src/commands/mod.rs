@@ -178,6 +178,14 @@ pub fn status(paths: &Paths) -> Result<()> {
         theme::dim("session"),
         paths.session_file().display()
     );
+    // Listed because it is easy to forget it is there at all: it holds the
+    // bodies of snapshotted messages, and the README points here rather than at
+    // its own table of platform paths.
+    eprintln!(
+        "  {}   {}",
+        theme::dim("cache  "),
+        paths.media_cache_dir().display()
+    );
     eprintln!("  {}   {}", theme::dim("account"), describe_account(paths));
     eprintln!();
 

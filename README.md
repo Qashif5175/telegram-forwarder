@@ -76,6 +76,17 @@ Prefer to do it yourself? Every release carries an archive per platform, each
 with its own `.sha256`, on the
 [releases page](https://github.com/awdr74100/telegram-forwarder/releases).
 
+**Shell completion** is printed on demand rather than installed for you, so it
+goes wherever your shell already looks:
+
+```sh
+tgfwd completions zsh  > "${fpath[1]}/_tgfwd"
+tgfwd completions bash > /etc/bash_completion.d/tgfwd
+tgfwd completions fish > ~/.config/fish/completions/tgfwd.fish
+```
+
+`elvish` and `powershell` work the same way.
+
 <details>
 <summary>Building from source</summary>
 
@@ -174,10 +185,15 @@ $EDITOR "$(tgfwd config path)"  # quotes matter: the macOS path contains a space
 |---|---|---|---|
 | `config.toml` | your API key and routes | `~/Library/Application Support/tgfwd/` | `~/.config/tgfwd/` |
 | `session.json` | the authorization key — a live credential | `~/Library/Application Support/tgfwd/` | `~/.local/share/tgfwd/` |
-| media cache | snapshotted bytes, safe to delete | `~/Library/Caches/tgfwd/` | `~/.cache/tgfwd/` |
+| media cache | snapshotted message bodies — private, but safe to delete | `~/Library/Caches/tgfwd/` | `~/.cache/tgfwd/` |
 
 On Windows these resolve under `%APPDATA%` and `%LOCALAPPDATA%`. Rather than
 trust this table, run `tgfwd status` — it prints the real answer for your machine.
+
+All three are written readable by you alone. The cache is the one that is easy to
+overlook: it holds the actual contents of messages from chats your account can
+see, for as long as `snapshot.ttl` allows, so it is treated as no more public
+than the credentials beside it.
 
 ### Multiple accounts
 

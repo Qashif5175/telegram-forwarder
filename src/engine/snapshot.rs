@@ -230,6 +230,20 @@ impl Snapshotter {
         let client = self.client.clone();
 
         tokio::spawn(async move {
+            // Created here rather than in `capture`, which must not perform a
+            // blocking syscall: the whole point of capture is that nothing
+            // delays it past the moment the source could be deleted.
+            //
+            // Created at all because `grammers` downloads through
+            // `File::create`, which leaves the mode to the umask. What lands in
+            // this file is the body of a message from a chat the account can
+            // see, and it is no more public than the session sitting beside it.
+            if let Err(error) = crate::private_file::create(&path) {
+                tracing::debug!(%error, "could not create the snapshot file");
+                let _ = tx.send(MediaCache::Failed);
+                return;
+            }
+
             let outcome = match client.download_media(&media, &path).await {
                 Ok(()) => MediaCache::Ready(path),
                 Err(error) => {
