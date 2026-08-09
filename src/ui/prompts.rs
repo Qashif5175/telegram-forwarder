@@ -333,23 +333,22 @@ where
     let message = message.into();
 
     blocking(move || {
+        let mut options = options;
         let labels: Vec<String> = options.iter().map(|(label, _)| label.clone()).collect();
-        let chosen = Select::new(&message, labels.clone())
+
+        // `raw_prompt` answers with the position, which `prompt` does not: it
+        // returns the chosen label, and finding that label again can only ever
+        // report the *first* entry that renders that way. Two routes moving the
+        // same chats under different filters are a legitimate configuration and
+        // render identically, so a label lookup would quietly hand back the
+        // wrong one — and `route remove` acting on the wrong one is unrecoverable.
+        let chosen = Select::new(&message, labels)
             .with_render_config(render_config())
-            .with_starting_cursor(start.min(labels.len().saturating_sub(1)))
-            .prompt()
+            .with_starting_cursor(start.min(options.len().saturating_sub(1)))
+            .raw_prompt()
             .map_err(map_error)?;
 
-        let index = labels
-            .iter()
-            .position(|label| label == &chosen)
-            .expect("the chosen label came from this list");
-
-        Ok(options
-            .into_iter()
-            .nth(index)
-            .expect("index came from the same list")
-            .1)
+        Ok(options.swap_remove(chosen.index).1)
     })
     .await
 }

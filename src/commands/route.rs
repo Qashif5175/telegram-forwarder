@@ -772,6 +772,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn two_routes_moving_the_same_chats_render_identically() {
+        // Not a defect in the rendering: a route is described by what it moves,
+        // and two routes moving the same chats under different filters or modes
+        // are a legitimate configuration. It is why the picker in `ui::prompts`
+        // resolves a choice by its position and never by its label — the labels
+        // are not unique, so a lookup could only ever find the first.
+        let mut config = config_with(&[("urgent-only", true), ("everything", true)]);
+        for route in &mut config.routes {
+            route.sources = vec![PeerLink {
+                id: -1001,
+                title: "Breaking News".to_owned(),
+                username: None,
+            }];
+            route.targets = vec![PeerLink {
+                id: -2001,
+                title: "Team".to_owned(),
+                username: None,
+            }];
+        }
+
+        let options = selectable_routes(&config, Selectable::Any);
+        assert_eq!(options[0].0, options[1].0, "labels are expected to collide");
+        assert_ne!(options[0].1, options[1].1, "the ids behind them must not");
+    }
+
+    #[test]
     fn slugify_makes_an_ascii_identifier() {
         assert_eq!(slugify("Tech News Daily"), "tech-news-daily");
         assert_eq!(slugify("  spaced  out  "), "spaced-out");
