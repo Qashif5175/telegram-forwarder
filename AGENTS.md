@@ -240,6 +240,11 @@ A pushed tag matching `v*` is the whole trigger. `dist` builds the five target
 platforms, writes the installer scripts, checksums everything and creates the
 GitHub Release, whose body is the matching section of `CHANGELOG.md`.
 
+`just build` before any of it. It builds with `--profile dist`, which is what
+`dist` uses and what `--release` is not: the first v0.1.0 tag failed on all five
+platforms with `profile \`dist\` is not defined` after a green `just check`,
+because nothing local had ever exercised the profile the release actually uses.
+
 `cargo release` does the preparing, configured by `release.toml`: it runs
 git-cliff to write the entry for the version, commits, and tags — locally.
 `cargo release 0.1.0` is a dry run; `-x` performs it. The push is then two
