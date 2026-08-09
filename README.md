@@ -4,8 +4,8 @@
 [![Release](https://img.shields.io/github/v/release/awdr74100/telegram-forwarder?display_name=tag&sort=semver)](https://github.com/awdr74100/telegram-forwarder/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Mirror Telegram messages from any number of chats into any number of other chats
-— built for publishers who post and then delete seconds later.
+Route any number of Telegram chats into any number of others. You pick them from
+a list; you never type an ID.
 
 The command is called **`tgfwd`**. That is the binary this repository builds;
 `telegram-forwarder` is the project and crate name.
@@ -37,22 +37,22 @@ If the forward fails, delivery walks down a ladder instead of giving up:
 The detail that makes this practical: **Copy does not re-upload anything.** It
 reuses the file reference Telegram already handed over, so falling back costs the
 same as a forward. That is why `auto` — keep attribution when you can, fall back
-instantly when you cannot — is the default rather than a slow safety net.
+instantly when you cannot — is the default.
 
 Messages that only arrived because of a fallback are counted separately as
 **rescued**, so you can see how often it actually mattered.
 
 ## Requirements
 
-- [rustup](https://rustup.rs). The toolchain is pinned in `rust-toolchain.toml`,
-  so a fresh clone builds with no further setup.
 - A **Telegram account** (not a bot — see [Why a user account](#why-a-user-account)).
 - Your own Telegram **API key**, which is free and takes about a minute to get.
-  The next section is entirely about that, because it is the one part nobody can
-  do for you.
+  [Where the login details come from](#where-the-login-details-come-from) covers
+  it, and `tgfwd login` walks you through it on the spot.
 
-No database, no C toolchain, no native dependencies. The build produces a single
-binary and the session is one JSON file.
+That is the whole list. No database, no C toolchain, no native dependencies and
+no Rust toolchain: `tgfwd` is a single binary and its session is one JSON file.
+Only building it yourself needs `rustup`, and that is pinned so a fresh clone
+compiles with no further setup.
 
 ## Install
 
@@ -93,6 +93,29 @@ for a Rust toolchain and a few minutes of compiling to deliver a binary the
 installer above hands over in seconds.
 
 </details>
+
+## Quick start
+
+```sh
+tgfwd login          # API key walkthrough, then phone + code
+tgfwd route add      # pick sources and targets from a searchable list
+tgfwd start          # go
+```
+
+**You never type a chat ID.** `route add` lists the chats your account is
+actually in, searchable by name, `@username` or ID, and flags the channels you do
+not have posting rights in *before* you pick them:
+
+```
+? Which chats should be watched?
+❯ ◻ 📢 台灣科技新聞      @twtech      -1001234567890
+  ◻ 📢 Breaking News     @news        -1009876543210
+  ◻ 👥 Team channel      —            -1005555555555  (no post rights)
+```
+
+This is deliberate: chat titles are full of emoji and symbols nobody can retype
+from memory, and a mistyped ID fails silently at delivery time — the worst
+possible moment to find out.
 
 ## Where the login details come from
 
@@ -166,29 +189,6 @@ TGFWD_HOME=~/.tgfwd-work tgfwd login
 TGFWD_HOME=~/.tgfwd-work tgfwd start
 ```
 
-## Quick start
-
-```sh
-tgfwd login          # API key walkthrough, then phone + code
-tgfwd route add      # pick sources and targets from a searchable list
-tgfwd start          # go
-```
-
-**You never type a chat ID.** `route add` lists the chats your account is
-actually in, searchable by name, `@username` or ID, and flags the channels you do
-not have posting rights in *before* you pick them:
-
-```
-? Which chats should be watched?
-❯ ◻ 📢 台灣科技新聞      @twtech      -1001234567890
-  ◻ 📢 Breaking News     @news        -1009876543210
-  ◻ 👥 Team channel      —            -1005555555555  (no post rights)
-```
-
-This is deliberate: chat titles are full of emoji and symbols nobody can retype
-from memory, and a mistyped ID fails silently at delivery time — the worst
-possible moment to find out.
-
 ## What a route is
 
 A route is one rule: **these source chats → these target chats**, plus how to
@@ -224,7 +224,7 @@ $ tgfwd route edit
 ```
 
 Editing a filter starts from the filter you already have — existing keywords come
-back in the input buffer rather than needing to be retyped.
+back in the input buffer, so nothing has to be retyped.
 
 <details>
 <summary>Naming a route explicitly, for scripts and cron</summary>
@@ -275,8 +275,8 @@ Two consequences worth knowing before you rely on them:
 
 ### What `skip_forwarded` is for
 
-It drops messages that already carry Telegram's "Forwarded from" header — that
-is, posts the source chat did not write itself but relayed from somewhere else.
+It drops messages that already carry Telegram's "Forwarded from" header — posts
+the source chat did not write itself but relayed from somewhere else.
 
 Two situations it exists for:
 
@@ -326,13 +326,13 @@ it finishes what is in flight, and that is a clean exit. Only pressing it again 
 declining to wait — reports the interruption.
 
 Losing the connection to Telegram is an error, not a clean stop, so a supervisor
-will restart rather than assume all is well.
+will restart instead of assuming all is well.
 
 ## Configuration
 
 `tgfwd route add` writes this for you, but it is plain TOML and meant to be read
 and edited by hand. `tgfwd config edit` opens it and **re-validates on save**, so
-a mistake is caught there rather than at the next start.
+a mistake is caught there instead of at the next start.
 
 ```toml
 [telegram]
@@ -400,9 +400,9 @@ hundred milliseconds spent here costs exactly that, while earning a `FLOOD_WAIT`
 instead costs whatever Telegram decides, holds a delivery slot while it waits,
 and fails outright once the wait exceeds `max_flood_wait`.
 
-The default is a conservative guess, not a derived figure — Telegram does not
-publish the limits that apply to user accounts, and the numbers usually quoted
-are the Bot API's, which do not. So tune it by observation rather than by
+The default is a conservative guess — Telegram does not publish the limits that
+apply to user accounts, and the numbers usually quoted are the Bot API's, which
+do not apply. So tune it by observation rather than by
 arithmetic: **`waiting out a rate limit` in the log is the signal.** If it appears
 at all, the interval is too short for your traffic. Setting it to `0` disables
 pacing altogether.
@@ -436,8 +436,8 @@ tgfwd doctor
 
 It checks that the config parses, that the routes are consistent, that
 credentials are present, that a session exists, and that **every configured chat
-is still reachable by this account** — which is the failure people hit most, and
-the one that is otherwise invisible until a delivery fails.
+is still reachable by this account** — the failure people hit most, and the one
+that stays invisible until a delivery fails.
 
 | Symptom | Likely cause |
 |---|---|
@@ -505,13 +505,13 @@ Working, and young. Everything documented here is implemented and covered by
 tests; it has been run against a real account, including the case it exists for —
 a post deleted seconds after it appeared, delivered from the local snapshot.
 
-Known gaps, stated rather than discovered:
+Known gaps, written down here so you do not have to find them yourself:
 
 - **A dead network is invisible for up to fifteen minutes.** Nothing is lost —
   the missed messages are replayed once the link returns — but until the
   underlying library gives up on its own, a silent connection and a quiet channel
-  look identical. Closing that needs a heartbeat, which is periodic traffic added
-  on purpose rather than a bug fix.
+  look identical. Closing that needs a heartbeat, which means adding periodic
+  traffic on purpose.
 - **Not on Homebrew, or anywhere but the GitHub Release.**
 - **Not tested against Telegram's rate limits at volume.** The pacing defaults
   are a conservative guess, because Telegram does not publish the limits that
