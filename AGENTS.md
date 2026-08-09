@@ -164,8 +164,9 @@ Individually: `just fmt`, `lint`, `test`, `unused`, `spell`, `workflows`, `audit
 `build`. `audit` also runs weekly on its own, because an advisory published
 against a crate already in the lock file turns a passing commit red without
 anybody touching the repository.
-The tools they need are `just`, `typos`, `actionlint`, `zizmor` and
-`cargo-shear`; the header of the `justfile` lists how to install them.
+The tools they need are `just`, `typos`, `actionlint`, `zizmor`, `cargo-shear`,
+`cargo-deny`, `git-cliff`, `cargo-dist` and `cargo-release`; `just setup`
+installs every one of them except `actionlint`, which is not a crate.
 
 CI runs these on every push and pull request, with warnings promoted to errors
 and `--locked` so a dependency bumped without committing `Cargo.lock` fails there
@@ -231,11 +232,22 @@ A pushed tag matching `v*` is the whole trigger. `dist` builds the five target
 platforms, writes the installer scripts, checksums everything and creates the
 GitHub Release, whose body is the matching section of `CHANGELOG.md`.
 
-So the order is: `just changelog vX.Y.Z`, bump the version in `Cargo.toml`,
-commit, tag, push. The changelog entry is generated from the commits since the
-last tag, which is what the Conventional Commits convention is being enforced
-for. The 0.1.0 entry is written by hand — a generated list of fixes would have
-described repairs to code that no release had ever carried.
+`cargo release` does the preparing, configured by `release.toml`: it runs
+git-cliff to write the entry for the version, commits, and tags — locally.
+`cargo release 0.1.0` is a dry run; `-x` performs it. The push is then two
+commands, and deliberately not one: the branch first, and the tag only once CI
+on it is green, because the tag is what starts the build of five platforms and
+a public release.
+
+Nothing is written to `CHANGELOG.md` ahead of that. The file holds no entry for
+an unreleased version, so a version and a date in it always describe a release
+that happened — the failure this replaced was a hand-written `0.1.0` section
+carrying a date four days before anything shipped, with nothing in the
+repository responsible for noticing.
+
+The entry is generated from the commits since the last tag, which is what the
+Conventional Commits convention is being enforced for. No category is skipped;
+`cliff.toml` says why.
 
 `.github/workflows/release.yml` is **generated** from `dist-workspace.toml` and
 committed, so the pipeline keeps working whatever happens to the tool. Never
