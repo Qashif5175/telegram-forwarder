@@ -119,14 +119,14 @@ not have posting rights in *before* you pick them:
 
 ```
 ? Which chats should be watched?
-❯ ◻ 📢 台灣科技新聞      @twtech      -1001234567890
+❯ ◻ 📢 Tech Daily        @twtech      -1001234567890
   ◻ 📢 Breaking News     @news        -1009876543210
   ◻ 👥 Team channel      —            -1005555555555  (no post rights)
 ```
 
-This is deliberate: chat titles are full of emoji and symbols nobody can retype
-from memory, and a mistyped ID fails silently at delivery time — the worst
-possible moment to find out.
+Titles appear exactly as Telegram holds them, in any script. That is the point:
+they are full of emoji and symbols nobody can retype from memory, and a mistyped
+ID fails silently at delivery time — the worst possible moment to find out.
 
 ## Where the login details come from
 
@@ -274,7 +274,8 @@ Matching is **case-insensitive substring** matching. There is no regex dialect
 and no word-boundary rule:
 
 - `urgent` matches `URGENT`, `Urgently`, and also `insurgent`
-- `快訊` matches `【快訊】今日重點`
+- there is no word boundary to respect, which is also what makes it work
+  unchanged for scripts that do not put spaces between words
 - `exclude` is checked first, so a message matching both is dropped
 
 Two consequences worth knowing before you rely on them:
@@ -317,7 +318,7 @@ Every delivery is announced as it happens, including the ones that went fine —
 silence would read exactly like a tool that is quietly broken:
 
 ```
-12:04:31 ✔ delivered to Tech News   route=mirror via=forward took=812ms what=市場快訊…
+12:04:31 ✔ delivered to Tech News   route=mirror via=forward took=812ms what=Markets open higher after…
 12:04:33 ✔ rescued into Tech News   route=mirror via=copy    took=1.2s  what=photo message
 ```
 
@@ -380,7 +381,7 @@ targets = [
 ]
 
 [route.filter]
-include = ["urgent", "快訊"]
+include = ["urgent", "breaking"]
 exclude = ["sponsored"]
 require_media = false
 skip_forwarded = false
