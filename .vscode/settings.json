@@ -11,11 +11,17 @@
     "editor.formatOnSave": true
   },
 
-  // The editor should fail on exactly what CI fails on. Without these,
-  // rust-analyzer runs plain `cargo check`, which is quieter than `just lint`
-  // in both directions: no pedantic lints, and nothing from tests.
+  // The editor should fail on exactly what CI fails on. Without this,
+  // rust-analyzer runs plain `cargo check`, which is quieter than `just lint`:
+  // none of the pedantic lints fire.
+  //
+  // `--all-targets` is not set here even though `just lint` passes it. It is
+  // already rust-analyzer's default — `check.allTargets` falls back to
+  // `cargo.allTargets`, which is `true` — so adding it produced the flag twice,
+  // and cargo now rejects that outright rather than ignoring the repeat:
+  //
+  //   error: the argument '--all-targets' cannot be used multiple times
   "rust-analyzer.check.command": "clippy",
-  "rust-analyzer.check.extraArgs": ["--all-targets"],
 
   // The prose in README.md and AGENTS.md is wrapped by hand at 80 columns.
   // Every Markdown formatter reflows it, which rewrites both files entirely and
