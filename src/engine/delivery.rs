@@ -133,9 +133,11 @@ impl Pacer {
 
     /// Wait until it is this target's turn, then claim the slot.
     ///
-    /// The slot is reserved while still holding the lock, so two concurrent
-    /// deliveries to the same chat queue up instead of both deciding they may
-    /// go now.
+    /// The map holds the instant the most recent caller will send at, which may
+    /// be in the future because the slot is reserved while the lock is still
+    /// held. The next slot is therefore an interval after *that*, not an
+    /// interval after now — waiting only from now collapses every caller queued
+    /// behind a reservation onto the same instant.
     pub async fn acquire(&self, target_id: i64) {
         if self.interval.is_zero() {
             return;
@@ -145,16 +147,14 @@ impl Pacer {
             let mut last = self.last_sent.lock().await;
             let now = Instant::now();
 
-            let wait = last
+            // `max(now)` is what lets an idle chat go immediately: a reservation
+            // already in the past imposes no wait at all.
+            let slot = last
                 .get(&target_id)
-                .map(|previous| {
-                    let elapsed = now.duration_since(*previous);
-                    self.interval.saturating_sub(elapsed)
-                })
-                .unwrap_or_default();
+                .map_or(now, |previous| (*previous + self.interval).max(now));
 
-            last.insert(target_id, now + wait);
-            wait
+            last.insert(target_id, slot);
+            slot.saturating_duration_since(now)
         };
 
         if !sleep_for.is_zero() {
@@ -933,6 +933,48 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_millis(100),
             "different chats must not queue behind each other"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_deliveries_to_one_chat_are_each_spaced() {
+        // The real caller spawns one task per target, so several deliveries into
+        // the same chat arrive here at once. Reserving from `now` rather than
+        // from the slot already reserved let every caller after the second pick
+        // the same instant, which is exactly the burst the pacer exists to stop.
+        let pacer = Arc::new(Pacer::new(Duration::from_millis(120)));
+        let start = Instant::now();
+
+        let mut set = tokio::task::JoinSet::new();
+        for _ in 0..3 {
+            let pacer = Arc::clone(&pacer);
+            set.spawn(async move { pacer.acquire(-1001).await });
+        }
+        while set.join_next().await.is_some() {}
+
+        // Three deliveries means two gaps. Generous lower bound: the timer only
+        // has to prove the third waited behind the second.
+        assert!(
+            start.elapsed() >= Duration::from_millis(200),
+            "three deliveries to one chat finished in {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_chat_that_has_been_idle_is_not_made_to_wait() {
+        // The reservation from a previous delivery is long past, so it must not
+        // be turned into a fresh interval of waiting.
+        let pacer = Pacer::new(Duration::from_millis(50));
+        pacer.acquire(-1001).await;
+        tokio::time::sleep(Duration::from_millis(80)).await;
+
+        let start = Instant::now();
+        pacer.acquire(-1001).await;
+        assert!(
+            start.elapsed() < Duration::from_millis(25),
+            "an idle chat waited {:?}",
+            start.elapsed()
         );
     }
 
