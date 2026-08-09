@@ -10,7 +10,7 @@ edition = "2024"
 # prebuilt binary where it is not.
 rust-version = "1.97.1"
 description = "Many-to-many Telegram forwarder: route any number of chats into any number of others, each with its own filter and delivery mode"
-authors = ["telegram-forwarder contributors"]
+authors = ["Roya <a78945612385238@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/awdr74100/telegram-forwarder"
 keywords = ["telegram", "mtproto", "forwarder", "cli"]
