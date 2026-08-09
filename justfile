@@ -35,6 +35,7 @@ default:
 setup:
     cargo install cargo-binstall
     cargo binstall --no-confirm cargo-shear cargo-deny git-cliff typos-cli zizmor
+    cargo binstall --no-confirm cargo-release
     # Pinned: `dist generate --check` compares against what one specific version
     # emits, so a newer one here reports the committed workflow as stale. Keep
     # this equal to `cargo-dist-version` in dist-workspace.toml.
@@ -83,15 +84,13 @@ workflows:
     actionlint
     zizmor --no-progress .github/workflows/
 
-# Prepend the next version's entry to CHANGELOG.md, generated from the commits
-# since the last tag. `dist` puts that section into the GitHub Release body.
+# Preview the entry the next release will write, without writing it.
 #
-#   just changelog v0.2.0
-#
-# The 0.1.0 entry is written by hand: a generated "Fixed" list would describe
-# repairs to code no release had ever carried.
-changelog version:
-    git cliff --unreleased --tag {{ version }} --prepend CHANGELOG.md
+# Deliberately read-only: `cargo release` generates the real entry through the
+# pre-release hook in `release.toml`, and a copy prepended by hand beforehand
+# would leave the file with two sections for the same version.
+changelog:
+    git cliff --unreleased
 
 # Regenerate the release workflow after changing dist-workspace.toml, and fail
 # if it was left stale. `dist` writes the workflow; it is committed like any
