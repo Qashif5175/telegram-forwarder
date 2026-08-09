@@ -21,10 +21,6 @@
     // over an unpinned action, and a SHA is not something a human can track.
     "helpers:pinGitHubActionDigests",
 
-    // One pull request for everything non-major. Five separate ones for five
-    // patch bumps is five CI runs and five reviews for one decision.
-    "group:allNonMajor",
-
     // Titles become `chore(deps): …`, which is what `semantic-pr.yml` requires
     // and what `cliff.toml` files under Miscellaneous.
     ":semanticCommitTypeAll(chore)",
@@ -34,16 +30,51 @@
     ":maintainLockFilesWeekly"
   ],
 
-  // Rewrite the requirement in `Cargo.toml`, not only the lock file. With
-  // `update-lockfile` a dependency that has moved past its caret range — `rand`
-  // 0.9 to 0.10, `toml` 0.9 to 1.0 — would never be proposed at all, which is
-  // the exact gap `cargo outdated` was being used to cover.
-  "rangeStrategy": "bump",
+  // Leave the requirement in `Cargo.toml` alone and move the lock file instead.
+  // `bump` rewrote every loose bound it touched — `tokio = "1"` became
+  // `"1.53.1"`, `clap = "4"` became `"4.6.6"` — which says something the author
+  // did not: those bounds are deliberately loose. Anything genuinely outside a
+  // range still reaches the manifest, because there is no lock-only way to
+  // express it.
+  "rangeStrategy": "update-lockfile",
 
-  // A release is likeliest to be yanked or found broken in its first hours.
-  "minimumReleaseAge": "1 day",
+  // A release is likeliest to be yanked or found broken in its first days. The
+  // median across the Rust projects that set this at all is three.
+  "minimumReleaseAge": "3 days",
 
   "packageRules": [
+    // Cargo's semver is not Renovate's. Below 1.0 a *minor* bump is the
+    // breaking one — `rand` 0.9 to 0.10 removed `random_range` and stopped this
+    // crate compiling — while Renovate reads the leading zero as the major and
+    // files it with the harmless updates.
+    //
+    // So: patches are left to lock file maintenance, minors are left to it too
+    // wherever the caret already covers them, and what remains needing a human
+    // is exactly the set that can break a build. `rust-lang/rustup` and
+    // `rustls` carry this identical pair.
+    {
+      "description": "Patch bumps ride along with weekly lock file maintenance",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["patch"],
+      "enabled": false
+    },
+    {
+      "description": "At 1.0 and above a minor bump is in range; below it, it is not",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor"],
+      "matchCurrentVersion": "!/^0/",
+      "enabled": false
+    },
+    {
+      // Digest pinning means every release of an action is a new SHA, and some
+      // release often — `taiki-e/install-action` moved three patch versions in
+      // the days this took to set up. One pull request a week rather than one
+      // per release. `starship` groups them for the same reason.
+      "description": "Action digests churn; batch them",
+      "matchDepTypes": ["action"],
+      "groupName": "GitHub Actions",
+      "extends": ["schedule:weekly"]
+    },
     {
       // `release.yml` is generated from `dist-workspace.toml`, and
       // `just release-check` fails when the two disagree. An action bump made
