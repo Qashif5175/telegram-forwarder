@@ -46,11 +46,19 @@ main.rs → cli.rs → commands/ → engine/
                              → ui/             (theme, prompts, logger)
 ```
 
-`private_file.rs` exists so the two files this tool persists get the same answer.
-Both hold something other users of the machine should not read — the session file
-*is* a login to the account, the configuration holds `api_hash` — and having the
-session be careful while the configuration inherited the umask was a difference
-with no reason behind it.
+`private_file.rs` exists so everything this tool persists gets the same answer.
+All three hold something other users of the machine should not read — the session
+file *is* a login to the account, the configuration holds `api_hash`, and the
+media cache holds the bodies of messages from chats the account can see. Having
+one of them be careful while the others inherited the umask was a difference with
+no reason behind it.
+
+The cache needs `create` rather than `write` because `grammers` does the writing:
+it opens the path with `File::create`, which keeps the mode of a file that is
+already there, so creating it first is what decides that mode. Every entry point
+unlinks before creating, because `OpenOptions::mode` applies only to a file it
+creates and both configuration and session write through a fixed temporary name
+that a killed process can leave behind.
 
 `telegram/` never depends on `cli/`, `config/` or `ui/`. The login flow asks
 questions through the `LoginPrompt` trait so it carries no terminal dependency.

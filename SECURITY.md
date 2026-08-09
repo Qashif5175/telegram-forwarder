@@ -15,21 +15,30 @@ There is no bounty, and no guaranteed response time. This is a small project.
 
 ## What this tool holds
 
-Two files matter, and they are not equally sensitive:
+Three things are written to disk, and they are not equally sensitive:
 
-| File | What it is |
+| What | Why it matters |
 |---|---|
-| `session.json` | **A live credential.** Whoever holds it is signed into the Telegram account, without a password or a login code. It is written `chmod 600` — created with those permissions, not tightened afterwards. |
+| `session.json` | **A live credential.** Whoever holds it is signed into the Telegram account, without a password or a login code. |
 | `config.toml` | Your `api_id` and `api_hash`. These identify the *application*, not you, but they are still yours and are not meant to be published. |
+| media cache | The bodies of messages this account can see, kept for `snapshot.ttl` so a deleted post can still be delivered. Not a credential, but other people's content. |
 
-`tgfwd config path` prints where they live. `tgfwd logout` revokes the session
-server-side and deletes the local file.
+All three are created readable and writable by the owner alone, with the
+permissions applied *as the file is created* rather than tightened afterwards —
+a create-then-`chmod` leaves the contents exposed for as long as the write takes.
+The cache is included in that deliberately: `grammers` downloads through
+`File::create`, which would leave the mode to the umask, so the file is created
+before the download rather than by it.
+
+`tgfwd config path` prints where the configuration lives and `tgfwd status`
+prints all three. `tgfwd logout` revokes the session server-side and deletes the
+local file.
 
 ## In scope
 
-- Anything that discloses the session file or its contents to another user or
-  process on the same machine, including through permissions, temporary files,
-  logs, error messages or crash output.
+- Anything that discloses the session file, the configuration or the media
+  cache to another user or process on the same machine, including through
+  permissions, temporary files, logs, error messages or crash output.
 - Anything that writes credentials somewhere that is not the session or config
   file.
 - A path where messages are delivered to a chat that no configured route names.
