@@ -1,0 +1,92 @@
+// Dependency updates, opened as pull requests rather than remembered.
+//
+// This replaces running `cargo outdated` before a release, which is what
+// projects without a bot do — ripgrep and `just` both document it as a manual
+// step. A step that has to be remembered is the same shape as the changelog
+// date that went stale: nothing was watching it.
+//
+// `cargo deny` already covers the *security* half on its own weekly schedule.
+// What this adds is freshness, and the two files no other bot can see.
+//
+// JSON5 so the reasoning can sit next to the rule, like every other config
+// file here. Renovate reads either.
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+
+  "extends": [
+    "config:recommended",
+
+    // Pin every action to an immutable SHA and keep the `# v1.2.3` comment
+    // beside it accurate. Not a preference: `.github/zizmor.yml` fails a build
+    // over an unpinned action, and a SHA is not something a human can track.
+    "helpers:pinGitHubActionDigests",
+
+    // One pull request for everything non-major. Five separate ones for five
+    // patch bumps is five CI runs and five reviews for one decision.
+    "group:allNonMajor",
+
+    // Titles become `chore(deps): …`, which is what `semantic-pr.yml` requires
+    // and what `cliff.toml` files under Miscellaneous.
+    ":semanticCommitTypeAll(chore)",
+
+    // Refresh transitive dependencies inside the existing ranges. `Cargo.lock`
+    // is committed and CI builds `--locked`, so nothing moves without a commit.
+    ":maintainLockFilesWeekly"
+  ],
+
+  // Rewrite the requirement in `Cargo.toml`, not only the lock file. With
+  // `update-lockfile` a dependency that has moved past its caret range — `rand`
+  // 0.9 to 0.10, `toml` 0.9 to 1.0 — would never be proposed at all, which is
+  // the exact gap `cargo outdated` was being used to cover.
+  "rangeStrategy": "bump",
+
+  // A release is likeliest to be yanked or found broken in its first hours.
+  "minimumReleaseAge": "1 day",
+
+  "packageRules": [
+    {
+      // `release.yml` is generated from `dist-workspace.toml`, and
+      // `just release-check` fails when the two disagree. An action bump made
+      // here would be reverted by the next regeneration and would fail CI in
+      // the meantime. `dist` owns those pins; upgrading it is a human step that
+      // regenerates the file.
+      "description": "release.yml is generated; dist owns its action pins",
+      "matchFileNames": [".github/workflows/release.yml"],
+      "matchManagers": ["github-actions"],
+      "enabled": false
+    },
+    {
+      // `rust-toolchain.toml` and `rust-version` are deliberately equal — see
+      // the comment above `rust-version` in `Cargo.toml`. Moving one without
+      // the other would make the MSRV a claim nothing compiles against.
+      "description": "The toolchain and the MSRV move together or not at all",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["rust", "msrv"],
+      "groupName": "Rust toolchain"
+    }
+  ],
+
+  // Neither file below is visible to any built-in manager, which is the main
+  // reason this is Renovate and not Dependabot. Both patterns are the ones
+  // `astral-sh/uv` and `astral-sh/ruff` use.
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The pinned toolchain in rust-toolchain.toml",
+      "managerFilePatterns": ["/(^|/)rust-toolchain\\.toml?$/"],
+      "matchStrings": ["channel\\s*=\\s*\"(?<currentValue>\\d+\\.\\d+(\\.\\d+)?)\""],
+      "depNameTemplate": "rust",
+      "packageNameTemplate": "rust-lang/rust",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "The minimum supported Rust version in Cargo.toml",
+      "managerFilePatterns": ["/(^|/)Cargo\\.toml?$/"],
+      "matchStrings": ["rust-version\\s*=\\s*\"(?<currentValue>\\d+\\.\\d+(\\.\\d+)?)\""],
+      "depNameTemplate": "msrv",
+      "packageNameTemplate": "rust-lang/rust",
+      "datasourceTemplate": "github-releases"
+    }
+  ]
+}
